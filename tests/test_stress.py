@@ -111,3 +111,8 @@ def test_api_flow(client):
     assert r.json()["status"] == "completed"
     assert client.get(f"/api/v1/stress/sessions/{sid}").json()["score"] is not None
     assert client.get(f"/api/v1/stress/sessions/nope").status_code == 404
+
+
+def test_start_for_unregistered_device_is_404(client):
+    r = client.post("/api/v1/stress/sessions", json={"device_id": "ghost"})
+    assert r.status_code == 404
