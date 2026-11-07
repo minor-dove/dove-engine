@@ -88,3 +88,47 @@ class LLMService:
             logger.error(f"Error calling Groq API: {type(e).__name__}: {str(e)}")
 
         return FALLBACK_REPLY
+
+
+def _extract_json(text: str):
+    """Parse a JSON object out of an LLM reply (tolerates code fences / prose)."""
+    import json
+    import re
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+def generate_json(system_prompt: str, user_prompt: str):
+    """
+    One-shot Groq call returning a parsed JSON object, or None when unconfigured/failed.
+    Callers must supply their own deterministic fallback.
+    """
+    if not LLMService.is_configured():
+        return None
+    payload = {
+        "model": settings.GROQ_MODEL,
+        "messages": [{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": user_prompt}],
+        "temperature": 0.0,
+        "max_tokens": 200,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}", "Content-Type": "application/json"}
+    try:
+        with httpx.Client(timeout=settings.GROQ_TIMEOUT_SECONDS) as client:
+            r = client.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers)
+            if r.status_code == 200:
+                choices = r.json().get("choices", [])
+                if choices:
+                    return _extract_json(choices[0].get("message", {}).get("content") or "")
+            logger.warning(f"Groq JSON call status {r.status_code}")
+    except Exception as e:
+        logger.error(f"Groq JSON call failed: {type(e).__name__}")
+    return None

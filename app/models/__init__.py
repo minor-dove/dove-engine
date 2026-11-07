@@ -12,6 +12,7 @@ from app.models.task import TaskItem
 from app.models.reminder import Reminder
 from app.models.preference import UserPreference
 from app.models.routine import RoutineExecution
+from app.models.stress import StressSession, StressItemResponse
 
 __all__ = [
     "Device",
@@ -28,4 +29,6 @@ __all__ = [
     "Reminder",
     "UserPreference",
     "RoutineExecution",
+    "StressSession",
+    "StressItemResponse",
 ]

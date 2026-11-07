@@ -58,7 +58,7 @@ services:
       - MQTT_BROKER_HOST=mqtt
       - MQTT_BROKER_PORT=1883
       - GROQ_API_KEY=${GROQ_API_KEY:-gsk_placeholder}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-qwen/qwen3.8-27b}
       - PROACTIVE_COOLDOWN_MINUTES=${PROACTIVE_COOLDOWN_MINUTES:-30}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
     ports:
@@ -87,7 +87,7 @@ services:
       - MQTT_BROKER_HOST=mqtt
       - MQTT_BROKER_PORT=1883
       - GROQ_API_KEY=${GROQ_API_KEY:-gsk_placeholder}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-qwen/qwen3.8-27b}
       - PROACTIVE_COOLDOWN_MINUTES=${PROACTIVE_COOLDOWN_MINUTES:-30}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
     command: ["python", "-m", "app.worker"]

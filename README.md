@@ -81,7 +81,7 @@ The edge device sends classification IDs every minute:
 - **Database**: PostgreSQL 16 with `pgvector` & SQLAlchemy 2.0
 - **Database Migrations**: Alembic
 - **Hardware Messaging**: Eclipse Mosquitto & MQTT (`paho-mqtt`)
-- **LLM Integration**: Groq API (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`)
+- **LLM Integration**: Groq API (`qwen/qwen3.8-27b` / `llama-3.1-8b-instant`)
 - **Memory & RAG**: Semantic vector retrieval with provenance and false-trigger purge
 - **Scheduler**: Persistent background scheduler for routines and reminders
 - **Containerization**: Docker & Docker Compose
