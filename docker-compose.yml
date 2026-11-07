@@ -1,0 +1,98 @@
+version: '3.8'
+
+# ==============================================================================
+# Docker Compose for Project DOVE Backend Environment
+# Components: PostgreSQL (with pgvector), Eclipse Mosquitto, FastAPI API, Worker
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL with pgvector extension enabled
+  # ----------------------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: dove_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dove_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dove_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dove_db}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dove_user} -d ${POSTGRES_DB:-dove_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Eclipse Mosquitto MQTT Broker (Anonymous access for local dev)
+  # ----------------------------------------------------------------------------
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: dove_mqtt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Application Server (REST endpoints for companion app & Swagger UI)
+  # ----------------------------------------------------------------------------
+  api:
+    build: .
+    container_name: dove_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-dove_user}:${POSTGRES_PASSWORD:-dove_password}@db:5432/${POSTGRES_DB:-dove_db}
+      - MQTT_BROKER_HOST=mqtt
+      - MQTT_BROKER_PORT=1883
+      - GROQ_API_KEY=${GROQ_API_KEY:-gsk_placeholder}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PROACTIVE_COOLDOWN_MINUTES=${PROACTIVE_COOLDOWN_MINUTES:-30}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------------------------
+  # Background Worker (MQTT Event Ingestion & Persistent Routine/Reminder Scheduler)
+  # ----------------------------------------------------------------------------
+  worker:
+    build: .
+    container_name: dove_worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-dove_user}:${POSTGRES_PASSWORD:-dove_password}@db:5432/${POSTGRES_DB:-dove_db}
+      - MQTT_BROKER_HOST=mqtt
+      - MQTT_BROKER_PORT=1883
+      - GROQ_API_KEY=${GROQ_API_KEY:-gsk_placeholder}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PROACTIVE_COOLDOWN_MINUTES=${PROACTIVE_COOLDOWN_MINUTES:-30}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+    command: ["python", "-m", "app.worker"]
+
+volumes:
+  postgres_data:
+  mosquitto_data:
+  mosquitto_log:
