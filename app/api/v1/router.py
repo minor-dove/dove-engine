@@ -14,6 +14,7 @@ from app.api.v1.memories import router as memories_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.stats import router as stats_router
 from app.api.v1.mood import router as mood_router
+from app.api.v1.stress import router as stress_router
 
 api_v1_router = APIRouter(prefix="/api/v1")
 
@@ -26,3 +27,4 @@ api_v1_router.include_router(memories_router)
 api_v1_router.include_router(devices_router)
 api_v1_router.include_router(stats_router)
 api_v1_router.include_router(mood_router)
+api_v1_router.include_router(stress_router)
