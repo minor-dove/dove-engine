@@ -173,6 +173,8 @@ For local development, **authentication and authorization requirements are disab
 | `dove/devices/{device_id}/events` | ESP32 -> Backend | Mood classifications every minute (`mood_id`, `event_id`, `recorded_at`) |
 | `dove/devices/{device_id}/conversation/message` | ESP32 -> Backend | User speech transcription after on-device wake-word detection |
 | `dove/devices/{device_id}/status` | ESP32 -> Backend | Heartbeat, firmware version, and battery telemetry |
+| `dove/devices/{device_id}/presence` | ESP32 -> Backend | `{"present": bool}` — user in front of the device; sessions only start while present |
+| `dove/devices/{device_id}/privacy` | ESP32 -> Backend | `{"mode": "on"\|"off"}` retained — do-not-disturb; aborts running sessions |
 | `dove/devices/{device_id}/commands` | Backend -> ESP32 | Speech prompts (`speak`), reminder alerts (`reminder_alert`), actions |
 
 ---
@@ -200,4 +202,7 @@ For local development, **authentication and authorization requirements are disab
 | `GET` | `/api/v1/memories` | List active long-term memories |
 | `POST` | `/api/v1/memories/search` | Semantically search long-term memories |
 | `DELETE` | `/api/v1/memories/{id}` | Permanently delete a memory record |
+| `POST` | `/api/v1/stress/sessions` | Start a stress session (planner does this automatically while the user is present) |
+| `POST` | `/api/v1/stress/sessions/{id}/answer` | Submit an answer; returns next question or the final score |
+| `GET` | `/api/v1/stress/days/{date}` | Day score = mean of completed session scores |
 | `GET` | `/api/v1/stats` | Aggregated metrics (conversations, tasks, reminders, routines, mood history) |

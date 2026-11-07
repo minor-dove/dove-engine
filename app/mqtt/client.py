@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any
 import paho.mqtt.client as mqtt
 
 from app.core.config import settings
-from app.mqtt.topics import TOPIC_EVENTS_SUB, TOPIC_STATUS_SUB, TOPIC_CONVERSATION_SUB, TOPIC_COMMANDS
-from app.mqtt.handlers import handle_incoming_mood_event, handle_incoming_device_status, handle_incoming_voice_message
+from app.mqtt.topics import TOPIC_EVENTS_SUB, TOPIC_STATUS_SUB, TOPIC_CONVERSATION_SUB, TOPIC_COMMANDS, TOPIC_PRESENCE_SUB, TOPIC_PRIVACY_SUB
+from app.mqtt.handlers import handle_incoming_mood_event, handle_incoming_device_status, handle_incoming_voice_message, handle_incoming_presence, handle_incoming_privacy
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class MQTTService:
             client.subscribe(TOPIC_EVENTS_SUB, qos=1)
             client.subscribe(TOPIC_STATUS_SUB, qos=1)
             client.subscribe(TOPIC_CONVERSATION_SUB, qos=1)
+            client.subscribe(TOPIC_PRESENCE_SUB, qos=1)
+            client.subscribe(TOPIC_PRIVACY_SUB, qos=1)
             logger.info("Subscribed to DOVE device topics.")
         else:
             self.is_connected = False
@@ -58,6 +60,10 @@ class MQTTService:
                 handle_incoming_mood_event(topic, payload, mqtt_publisher=self)
             elif topic.endswith("/status"):
                 handle_incoming_device_status(topic, payload)
+            elif topic.endswith("/presence"):
+                handle_incoming_presence(topic, payload)
+            elif topic.endswith("/privacy"):
+                handle_incoming_privacy(topic, payload, mqtt_publisher=self)
             elif "/conversation/message" in topic:
                 handle_incoming_voice_message(topic, payload, mqtt_publisher=self)
         except Exception as e:

@@ -63,21 +63,7 @@ def handle_incoming_mood_event(topic: str, payload_bytes: bytes, mqtt_publisher:
     # Process with TriggerEngine
     db = SessionLocal()
     try:
-        result = TriggerEngine.ingest_mood_event(db, event_obj)
-        
-        # If trigger initiated a proactive check-in, publish speech command to ESP32
-        if result.get("trigger_outcome", {}).get("action") == "initiated" and mqtt_publisher:
-            outcome = result["trigger_outcome"]
-            mqtt_publisher.publish_command(
-                device_id=event_obj.device_id,
-                command_type="speak",
-                payload={
-                    "text": outcome["starter_text"],
-                    "session_id": outcome["session_id"],
-                    "trigger_type": outcome["trigger_type"]
-                }
-            )
-        return result
+        return TriggerEngine.ingest_mood_event(db, event_obj)
     except PrivacyViolationError as pve:
         logger.critical(f"Privacy violation detected during processing: {pve}")
         return {"status": "rejected", "reason": "privacy_violation"}
@@ -160,5 +146,44 @@ def handle_incoming_voice_message(topic: str, payload_bytes: bytes, mqtt_publish
     except Exception as e:
         logger.error(f"Error handling conversation message: {e}")
         return {"status": "error", "detail": str(e)}
+    finally:
+        db.close()
+
+
+def _device_id_from_topic(topic: str) -> str:
+    parts = topic.strip("/").split("/")
+    return parts[2] if len(parts) >= 3 else "unknown"
+
+
+def handle_incoming_presence(topic: str, payload_bytes: bytes) -> Dict[str, Any]:
+    """dove/devices/{id}/presence  ->  {"present": bool, "ts": iso}"""
+    from app.services.device_state_service import DeviceStateService
+    try:
+        data = json.loads(payload_bytes.decode("utf-8"))
+        present = bool(data["present"])
+    except Exception:
+        return {"status": "error", "reason": "invalid_payload"}
+    db = SessionLocal()
+    try:
+        DeviceStateService.set_presence(db, _device_id_from_topic(topic), present)
+        return {"status": "updated", "present": present}
+    finally:
+        db.close()
+
+
+def handle_incoming_privacy(topic: str, payload_bytes: bytes, mqtt_publisher: Optional[Any] = None) -> Dict[str, Any]:
+    """dove/devices/{id}/privacy (retained)  ->  {"mode": "on"|"off", "ts": iso}. ON aborts running sessions."""
+    from app.services.device_state_service import DeviceStateService
+    try:
+        data = json.loads(payload_bytes.decode("utf-8"))
+        mode = data["mode"]
+        if mode not in ("on", "off"):
+            raise ValueError(mode)
+    except Exception:
+        return {"status": "error", "reason": "invalid_payload"}
+    db = SessionLocal()
+    try:
+        DeviceStateService.set_privacy(db, _device_id_from_topic(topic), mode == "on", mqtt_publisher=mqtt_publisher)
+        return {"status": "updated", "privacy": mode}
     finally:
         db.close()

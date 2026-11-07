@@ -1,6 +1,6 @@
 """
 Persistent Background Scheduler.
-Periodically polls database to deliver due reminders and execute daily routines.
+Periodically polls database to deliver due reminders and plan stress sessions.
 Automatically recovers pending reminders after system restart without duplicate delivery.
 """
 
@@ -12,7 +12,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.reminder_service import ReminderService
-from app.services.routine_service import RoutineService
+from app.services.stress_planner import StressPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,10 @@ class AppScheduler:
             if delivered:
                 logger.info(f"Delivered {len(delivered)} due reminders.")
 
-            # 2. Check and trigger daily routines
-            routines = RoutineService.check_and_execute_routines(db, mqtt_publisher=self.mqtt_publisher)
-            if routines:
-                logger.info(f"Executed {len(routines)} scheduled routines: {[r['routine_type'] for r in routines]}")
+            # 2. Presence-based stress sessions (replaces the old chatty daily routines)
+            started = StressPlanner.run(db, mqtt_publisher=self.mqtt_publisher)
+            if started:
+                logger.info(f"Started stress sessions for: {started}")
         except Exception as e:
             logger.error(f"Error in scheduler tick: {type(e).__name__}: {str(e)}")
         finally:

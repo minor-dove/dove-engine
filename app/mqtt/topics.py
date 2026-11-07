@@ -20,3 +20,7 @@ TOPIC_CONVERSATION = "dove/devices/{device_id}/conversation/message"
 
 # Outgoing commands from backend to ESP32 (TTS speech, reminder alerts, actions)
 TOPIC_COMMANDS = "dove/devices/{device_id}/commands"
+
+# Presence (user in front of the device) and privacy mode (DND). Privacy is retained, QoS 1.
+TOPIC_PRESENCE_SUB = "dove/devices/+/presence"
+TOPIC_PRIVACY_SUB = "dove/devices/+/privacy"
