@@ -144,7 +144,7 @@ For local development, **authentication and authorization requirements are disab
    pip install -r requirements.txt
    ```
 
-3. **Run database migrations / initialization**:
+3. **Run database migrations / initialization** (Alembic: `alembic upgrade head`; for a DB first created by `init_db()` run `alembic stamp 001_initial_schema` once, then `upgrade head`):
    ```bash
    python -c "from app.core.init_db import init_db; init_db()"
    ```
