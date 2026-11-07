@@ -59,13 +59,13 @@ class StressService:
 
     # ---------- helpers ----------
     @staticmethod
-    def local_today(db: Session) -> date:
+    def local_today(db: Session, now: Optional[datetime] = None) -> date:
         pref = db.query(UserPreference).filter(UserPreference.id == 1).first()
         try:
             tz = ZoneInfo(pref.timezone) if pref else timezone.utc
         except Exception:
             tz = timezone.utc
-        return datetime.now(timezone.utc).astimezone(tz).date()
+        return (now or datetime.now(timezone.utc)).astimezone(tz).date()
 
     @staticmethod
     def emotion_summary(db: Session, device_id: str, hours: int = 3) -> str:
@@ -132,7 +132,8 @@ class StressService:
 
     # ---------- lifecycle ----------
     @staticmethod
-    def start_session(db: Session, device_id: str, mqtt_publisher: Optional[Any] = None) -> Dict[str, Any]:
+    def start_session(db: Session, device_id: str, mqtt_publisher: Optional[Any] = None,
+                      now: Optional[datetime] = None) -> Dict[str, Any]:
         active = db.query(StressSession).filter(
             StressSession.device_id == device_id, StressSession.status == "active").first()
         if active:
@@ -149,7 +150,8 @@ class StressService:
         db.add(conv)
         db.flush()
         s = StressSession(device_id=device_id, conversation_session_id=conv.id,
-                          local_date=StressService.local_today(db), item_plan=json.dumps(plan))
+                          local_date=StressService.local_today(db, now), item_plan=json.dumps(plan),
+                          started_at=now or datetime.now(timezone.utc))
         db.add(s)
         db.flush()
 

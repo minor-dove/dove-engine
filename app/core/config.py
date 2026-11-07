@@ -46,8 +46,17 @@ class Settings(BaseSettings):
     QUIET_HOURS_END_DEFAULT: str = "07:00"
     USER_TIMEZONE_DEFAULT: str = "Asia/Kolkata"
 
-    # Mood Trigger Engine settings
-    MOOD_CONSECUTIVE_REQUIRED: int = 10
+    # Stress session planner (presence-based, min STRESS_DAILY_TARGET sessions/day)
+    STRESS_DAILY_TARGET: int = 3
+    STRESS_DAY_START: str = "09:00"            # local; first session slot opens here
+    STRESS_DAY_END: str = "21:00"              # local; no sessions started after this
+    STRESS_MIN_GAP_MINUTES: int = 120          # gap between completed sessions
+    STRESS_CATCHUP_GAP_MINUTES: int = 20       # used when the day is running out of time
+    STRESS_RETRY_MINUTES: int = 15             # wait after an unfinished attempt
+    STRESS_PRESENCE_SETTLE_SECONDS: int = 60   # user must be present this long first
+    STRESS_SESSION_TIMEOUT_MINUTES: int = 10   # idle active session is closed
+
+    # Mood ingestion settings
     MOOD_MAX_EVENT_GAP_SECONDS: int = 150  # 2.5 minutes between events (device posts every 60s)
     MOOD_EVENT_MAX_AGE_SECONDS: int = 1800  # 30 minutes stale threshold
 
