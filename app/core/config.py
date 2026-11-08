@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     MQTT_KEEPALIVE: int = 60
     MQTT_CLIENT_ID: str = "dove-backend-worker"
     MQTT_RECONNECT_DELAY_SECONDS: int = 5
+    # Process roles. Single-process dev: leave both True. Docker: the worker keeps both True; the API runs
+    # publish-only (MQTT_SUBSCRIBE=false, its own MQTT_CLIENT_ID) and RUN_SCHEDULER=false so sessions are
+    # planned and events consumed exactly once.
+    MQTT_SUBSCRIBE: bool = True
+    RUN_SCHEDULER: bool = True
 
     # Groq LLM API settings
     GROQ_API_KEY: Optional[str] = None

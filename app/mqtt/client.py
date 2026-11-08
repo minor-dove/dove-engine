@@ -35,13 +35,16 @@ class MQTTService:
         if rc == 0:
             self.is_connected = True
             logger.info(f"Connected to Mosquitto MQTT broker at {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT}")
-            # Subscribe to all device events and messages
-            client.subscribe(TOPIC_EVENTS_SUB, qos=1)
-            client.subscribe(TOPIC_STATUS_SUB, qos=1)
-            client.subscribe(TOPIC_CONVERSATION_SUB, qos=1)
-            client.subscribe(TOPIC_PRESENCE_SUB, qos=1)
-            client.subscribe(TOPIC_PRIVACY_SUB, qos=1)
-            logger.info("Subscribed to DOVE device topics.")
+            if settings.MQTT_SUBSCRIBE:
+                # Subscribe to all device events and messages
+                client.subscribe(TOPIC_EVENTS_SUB, qos=1)
+                client.subscribe(TOPIC_STATUS_SUB, qos=1)
+                client.subscribe(TOPIC_CONVERSATION_SUB, qos=1)
+                client.subscribe(TOPIC_PRESENCE_SUB, qos=1)
+                client.subscribe(TOPIC_PRIVACY_SUB, qos=1)
+                logger.info("Subscribed to DOVE device topics.")
+            else:
+                logger.info("MQTT publish-only mode (not subscribing).")
         else:
             self.is_connected = False
             logger.warning(f"Failed to connect to MQTT broker, return code: {rc}")

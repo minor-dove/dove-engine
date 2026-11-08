@@ -34,8 +34,9 @@ async def lifespan(app: FastAPI):
         # 2. Start MQTT network loop (tolerates offline broker gracefully)
         mqtt_service.start()
 
-        # 3. Start persistent scheduler
-        app_scheduler.start()
+        # 3. Start persistent scheduler (only in the process that owns planning: the worker in Docker)
+        if settings.RUN_SCHEDULER:
+            app_scheduler.start()
 
     yield
 
