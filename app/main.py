@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.init_db import init_db
 from app.core.database import get_db
 from app.api.v1.router import api_v1_router
+from app.api.ws_audio import router as ws_audio_router
 from app.mqtt.client import mqtt_service
 from app.services.scheduler import AppScheduler
 
@@ -68,6 +69,7 @@ app.add_middleware(
 
 # Include versioned API router
 app.include_router(api_v1_router)
+app.include_router(ws_audio_router)
 
 
 @app.get("/health", tags=["Health"])

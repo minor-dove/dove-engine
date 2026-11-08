@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_database
 from app.mqtt.client import mqtt_service
+from app.models.device import Device
 from app.models.stress import StressSession
 from app.services.stress_service import StressService
 
@@ -29,6 +30,8 @@ def _publisher():
 
 @router.post("/sessions", status_code=201)
 def start_session(body: StartRequest, db: Session = Depends(get_database)) -> Dict[str, Any]:
+    if not db.query(Device).filter(Device.id == body.device_id).first():
+        raise HTTPException(status_code=404, detail="Device not registered (POST /api/v1/devices first)")
     return StressService.start_session(db, body.device_id, mqtt_publisher=_publisher())
 
 
