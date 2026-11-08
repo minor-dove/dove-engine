@@ -4,6 +4,7 @@ Populates standard non-judgmental starters and default user preferences.
 """
 
 from datetime import datetime, timezone
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.core.database import Base, engine, SessionLocal
 from app.models.starter import ConversationStarter
@@ -49,8 +50,30 @@ DEFAULT_STARTERS = [
 ]
 
 
+_INIT_LOCK_KEY = 727274  # arbitrary app-wide Postgres advisory lock id
+
+
 def init_db(db: Session = None) -> None:
-    """Creates tables and seeds default records if empty."""
+    """Creates tables and seeds default records if empty.
+
+    On PostgreSQL this enables the pgvector extension first (create_all needs the `vector` type) and
+    serialises concurrent starters (API + worker boot together in Docker) with an advisory lock.
+    """
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as lock_conn:
+            lock_conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _INIT_LOCK_KEY})
+            try:
+                lock_conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                lock_conn.commit()
+                _create_and_seed(db)
+            finally:
+                lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _INIT_LOCK_KEY})
+                lock_conn.commit()
+    else:
+        _create_and_seed(db)
+
+
+def _create_and_seed(db: Session = None) -> None:
     # Ensure tables are created
     Base.metadata.create_all(bind=engine)
 

@@ -97,6 +97,14 @@ For local development, **authentication and authorization requirements are disab
 - Mosquitto allows anonymous connections without credentials.
 - Swagger UI (`http://localhost:8000/docs`) is immediately interactive.
 
+### Connecting the Dove device (LAN)
+
+By default every published port is bound to `127.0.0.1` (private to this machine). For the device to reach the
+broker (`1883`) and the API / voice WebSocket (`8000`) put `BIND_HOST=0.0.0.0` in `.env`, then in the firmware's
+`secrets.h` set `DOVE_MQTT_URI "mqtt://<this-machine-ip>:1883"` (and `DOVE_WS_URL` if the IP differs from the default).
+Dev auth is off: use a trusted network only. In Docker the **worker** consumes MQTT and runs the session planner; the
+**API** is publish-only (`MQTT_SUBSCRIBE=false`, `RUN_SCHEDULER=false`, own client id) so nothing runs twice.
+
 ### Running with Docker Compose
 
 1. **Clone the repository and enter the directory**:
