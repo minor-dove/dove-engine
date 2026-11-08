@@ -1,7 +1,12 @@
 """Speech-to-text and text-to-speech via Groq. Both return None on failure (callers degrade gracefully)."""
 
 import logging
+import os
 import re
+import subprocess
+import sys
+import tempfile
+import time
 from typing import List, Optional, Tuple
 
 import httpx
@@ -59,9 +64,46 @@ def split_text(text: str, limit: int = TTS_MAX_CHARS) -> List[str]:
     return chunks
 
 
+_groq_tts_blocked_until = 0.0  # after a terms/permission error, skip Groq TTS for a while (no log spam, no latency)
+
+
+def _synth_macos(text: str) -> Optional[Tuple[bytes, int]]:
+    """Dev-only voice: macOS `say` -> 16-bit mono WAV at AUDIO_SAMPLE_RATE. None on other platforms."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            aiff, wav = os.path.join(d, "t.aiff"), os.path.join(d, "t.wav")
+            subprocess.run(["say", "-r", "175", "-o", aiff, text], check=True, timeout=30)
+            subprocess.run(["afconvert", "-f", "WAVE", "-d", f"LEI16@{settings.AUDIO_SAMPLE_RATE}", "-c", "1", aiff, wav],
+                           check=True, timeout=30)
+            with open(wav, "rb") as f:
+                pcm, rate = wav_to_pcm(f.read())
+        return (pcm, rate) if pcm else None
+    except Exception as e:
+        logger.error(f"macOS say TTS failed: {type(e).__name__}")
+        return None
+
+
 def synthesize(text: str) -> Optional[Tuple[bytes, int]]:
     """Text -> (PCM16 mono at AUDIO_SAMPLE_RATE, rate). None if TTS is unavailable."""
-    if not text.strip() or not LLMService.is_configured():
+    global _groq_tts_blocked_until
+    if not text.strip():
+        return None
+    provider = settings.TTS_PROVIDER
+    if provider == "macos_say":
+        return _synth_macos(text)
+    if time.time() < _groq_tts_blocked_until and provider == "auto":
+        return _synth_macos(text)
+    result = _synthesize_groq(text)
+    if result is None and provider == "auto":
+        _groq_tts_blocked_until = time.time() + 600
+        return _synth_macos(text)
+    return result
+
+
+def _synthesize_groq(text: str) -> Optional[Tuple[bytes, int]]:
+    if not LLMService.is_configured():
         return None
     out = b""
     try:
