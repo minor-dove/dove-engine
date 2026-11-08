@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     GROQ_STT_MODEL: str = "whisper-large-v3-turbo"
     GROQ_TTS_MODEL: str = "canopylabs/orpheus-v1-english"
     GROQ_TTS_VOICE: str = "autumn"
-    TTS_PROVIDER: str = "auto"                 # auto = Groq, falling back to macOS `say` on a Mac dev server | groq | macos_say
     VOICE_SEND_PACE: float = 2.0               # TTS streamed at N x realtime (0 = as fast as possible)
     VOICE_FALLBACK_SPEED: float = 1.0          # text-only mouth timing speed-up (tests use a large value)
     VOICE_SILENCE_MS: int = 1000               # end of utterance after this much silence

@@ -193,24 +193,3 @@ def test_websocket_endpoint(client, db_session, monkeypatch):
                 assert d["score"] is not None
                 break
         assert got > 0
-
-
-def test_tts_auto_falls_back_to_macos_say(monkeypatch):
-    monkeypatch.setattr(settings, "TTS_PROVIDER", "auto")
-    monkeypatch.setattr(speech_service, "_groq_tts_blocked_until", 0.0)
-    calls = {"groq": 0, "say": 0}
-
-    def fake_groq(t):
-        calls["groq"] += 1
-        return None
-
-    def fake_say(t):
-        calls["say"] += 1
-        return tone(100), RATE
-    monkeypatch.setattr(speech_service, "_synthesize_groq", fake_groq)
-    monkeypatch.setattr(speech_service, "_synth_macos", fake_say)
-    assert speech_service.synthesize("hello") is not None
-    assert speech_service.synthesize("again") is not None   # Groq is skipped while blocked
-    assert calls == {"groq": 1, "say": 2}
-    monkeypatch.setattr(settings, "TTS_PROVIDER", "groq")
-    assert speech_service.synthesize("x") is None            # explicit provider: no fallback
