@@ -206,3 +206,16 @@ For local development, **authentication and authorization requirements are disab
 | `POST` | `/api/v1/stress/sessions/{id}/answer` | Submit an answer; returns next question or the final score |
 | `GET` | `/api/v1/stress/days/{date}` | Day score = mean of completed session scores |
 | `GET` | `/api/v1/stats` | Aggregated metrics (conversations, tasks, reminders, routines, mood history) |
+
+## API spec (OpenAPI)
+
+The generated OpenAPI 3 spec is checked in at `docs/openapi.json` and `docs/openapi.yaml`.
+Live docs when the API is running: `/docs` (Swagger UI), `/redoc`, `/openapi.json`.
+
+Regenerate after changing routes or schemas (no DB/MQTT needed):
+
+```bash
+python scripts/export_openapi.py   # needs requirements.txt + pyyaml
+```
+
+Note: OpenAPI does not describe the WebSocket audio endpoint (`app/api/ws_audio.py`) or the MQTT topics (see `docs/03_MQTT_CONTRACT.md` in the workspace root).
