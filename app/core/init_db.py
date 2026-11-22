@@ -73,9 +73,36 @@ def init_db(db: Session = None) -> None:
         _create_and_seed(db)
 
 
+# Columns added after the first release. create_all() only creates MISSING TABLES, so a database created by an
+# older version would lack these; add them in place (idempotent, additive only, defaults keep old rows valid).
+_ADDED_COLUMNS = {
+    "stress_sessions": [
+        ("daypart", "VARCHAR(16)"),
+        ("window", "VARCHAR(32)"),
+        ("followups_used", "INTEGER NOT NULL DEFAULT 0"),
+        ("awaiting_followup", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("summary", "TEXT"),
+    ],
+}
+
+
+def _ensure_columns() -> None:
+    from sqlalchemy import inspect
+    insp = inspect(engine)
+    for table, cols in _ADDED_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        have = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in cols:
+            if name not in have:
+                with engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {table} ADD COLUMN "{name}" {ddl}'))
+
+
 def _create_and_seed(db: Session = None) -> None:
     # Ensure tables are created
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
 
     own_session = False
     if db is None:

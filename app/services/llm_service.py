@@ -105,7 +105,7 @@ def _extract_json(text: str):
         return None
 
 
-def generate_json(system_prompt: str, user_prompt: str):
+def generate_json(system_prompt: str, user_prompt: str, max_tokens: int = 200, temperature: float = 0.0):
     """
     One-shot Groq call returning a parsed JSON object, or None when unconfigured/failed.
     Callers must supply their own deterministic fallback.
@@ -116,14 +116,23 @@ def generate_json(system_prompt: str, user_prompt: str):
         "model": settings.GROQ_MODEL,
         "messages": [{"role": "system", "content": system_prompt},
                      {"role": "user", "content": user_prompt}],
-        "temperature": 0.0,
-        "max_tokens": 200,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }
     headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}", "Content-Type": "application/json"}
     try:
         with httpx.Client(timeout=settings.GROQ_TIMEOUT_SECONDS) as client:
             r = client.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers)
+            if r.status_code == 429:  # rate limited: wait briefly (<= 4 s, the spoken turn must not stall) and retry once
+                import time
+                try:
+                    wait = min(float(r.headers.get("retry-after", "2")), 4.0)
+                except ValueError:
+                    wait = 2.0
+                logger.warning(f"Groq JSON call rate-limited; retrying in {wait:.1f}s")
+                time.sleep(wait)
+                r = client.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers)
             if r.status_code == 200:
                 choices = r.json().get("choices", [])
                 if choices:

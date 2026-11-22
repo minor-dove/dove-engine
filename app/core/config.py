@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     STRESS_MIN_GAP_MINUTES: int = 120          # gap between completed sessions
     STRESS_CATCHUP_GAP_MINUTES: int = 20       # used when the day is running out of time
     STRESS_RETRY_MINUTES: int = 15             # wait after an unfinished attempt
+    STRESS_MAX_FOLLOWUPS: int = 2              # unscored conversational follow-ups per session (0 = pure Q&A)
+    STRESS_FOLLOWUP_MIN_WORDS: int = 8         # only follow up when the answer had this much to react to
     STRESS_PRESENCE_SETTLE_SECONDS: int = 60   # user must be present this long first
     STRESS_SESSION_TIMEOUT_MINUTES: int = 10   # idle active session is closed
 

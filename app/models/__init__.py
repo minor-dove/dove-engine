@@ -14,6 +14,7 @@ from app.models.preference import UserPreference
 from app.models.routine import RoutineExecution
 from app.models.device_state import DeviceState
 from app.models.stress import StressSession, StressItemResponse
+from app.models.profile import UserProfile
 
 __all__ = [
     "Device",
@@ -33,4 +34,5 @@ __all__ = [
     "DeviceState",
     "StressSession",
     "StressItemResponse",
+    "UserProfile",
 ]

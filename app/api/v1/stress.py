@@ -10,6 +10,7 @@ from app.api.deps import get_database
 from app.mqtt.client import mqtt_service
 from app.models.device import Device
 from app.models.stress import StressSession
+from app.services.profile_service import ProfileService
 from app.services.stress_service import StressService
 
 router = APIRouter(prefix="/stress", tags=["Stress"])
@@ -62,3 +63,16 @@ def get_session(session_id: str, db: Session = Depends(get_database)) -> Dict[st
 @router.get("/days/{day}")
 def day_report(day: date, device_id: str = DEFAULT_DEVICE, db: Session = Depends(get_database)) -> Dict[str, Any]:
     return StressService.day_report(db, device_id, day)
+
+
+@router.get("/profile")
+def get_profile(device_id: str = DEFAULT_DEVICE, db: Session = Depends(get_database)) -> Dict[str, Any]:
+    """What Dove has learned from your check-ins (built only from what you said). Transparent by design."""
+    return {"device_id": device_id, "sessions_learned_from": ProfileService.sessions_count(db, device_id),
+            "profile": ProfileService.get(db, device_id)}
+
+
+@router.delete("/profile")
+def delete_profile(device_id: str = DEFAULT_DEVICE, db: Session = Depends(get_database)) -> Dict[str, Any]:
+    """Forget everything learned about the person; the next check-in starts generic again."""
+    return {"device_id": device_id, "deleted": ProfileService.reset(db, device_id)}
