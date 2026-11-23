@@ -27,12 +27,13 @@ def test_score_math_and_reverse():
 
 
 def test_needs_min_valid_items():
-    assert compute_score([(1, 2), (2, None), (3, 1)]) is None
+    assert compute_score([(1, 2), (2, None), (3, None)]) is None      # 1 usable of 3 is not enough
+    assert compute_score([(1, 2), (2, None), (3, 2)]) == 50.0         # 2 usable of 3 is
 
 
 def test_plan_has_reverse_item_and_rotates():
     p1 = plan_items({})
-    assert len(p1) == 5 and any(i in REVERSE_ITEMS for i in p1)
+    assert len(p1) == 3 and any(i in REVERSE_ITEMS for i in p1)
     p2 = plan_items({i: 1 for i in p1})
     assert set(p2) != set(p1)
 

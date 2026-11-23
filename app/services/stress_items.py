@@ -54,8 +54,8 @@ def item_question(item_id: int, window: str = "today") -> str:
     return f"{w[:1].upper()}{w[1:]}, {ITEM_STEMS[item_id]}"
 
 
-MIN_VALID_ITEMS = 3
-SESSION_ITEM_COUNT = 5
+MIN_VALID_ITEMS = 2        # of the (default 3) questions asked in a session, at least this many must be usable
+SESSION_ITEM_COUNT = 3     # questions per session (STRESS_ITEMS_PER_SESSION overrides)
 
 # Numeric score ranges (owner preference: report numbers, not labels).
 BANDS = [(33.0, "0-33"), (66.0, "34-66"), (100.0, "67-100")]
@@ -84,7 +84,7 @@ def compute_score(answers: List[Tuple[int, Optional[int]]]) -> Optional[float]:
     return round(sum(vals) / len(vals) / 4 * 100, 1)
 
 
-def plan_items(asked_counts: Dict[int, int], n: int = SESSION_ITEM_COUNT, daypart: Optional[str] = None,
+def plan_items(asked_counts: Dict[int, int], n: Optional[int] = None, daypart: Optional[str] = None,
                asked_today: Optional[Dict[int, int]] = None,
                drop_rates: Optional[Dict[int, float]] = None) -> List[int]:
     """
@@ -93,6 +93,9 @@ def plan_items(asked_counts: Dict[int, int], n: int = SESSION_ITEM_COUNT, daypar
       - 0.75 if it suits this part of the day  +  1.5 x how often the person's answer was unusable
     Always includes at least one positive (reverse-scored) item. Deterministic.
     """
+    if n is None:
+        from app.core.config import settings
+        n = settings.STRESS_ITEMS_PER_SESSION
     asked_today = asked_today or {}
     drop_rates = drop_rates or {}
     fit = DAYPART_AFFINITY.get(daypart or "", set())

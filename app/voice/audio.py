@@ -84,6 +84,24 @@ def normalize_speech(pcm: bytes, target_rms: float = 4500.0, max_gain: float = 6
     return out.tobytes()
 
 
+def shape_utterance(pcm: bytes, rate: int, fade_in_ms: int = 15, fade_out_ms: int = 90,
+                    tail_ms: int = 250) -> bytes:
+    """Make a synthesized utterance safe for a small class-D amp: fade in/out (no click at the edges) and end
+    on real silence so the device never cuts the speaker off in the middle of a waveform (that is the
+    'scratch' you hear at the end of a sentence)."""
+    if not pcm:
+        return pcm
+    a = array("h")
+    a.frombytes(pcm[: len(pcm) // 2 * 2])
+    n_in = min(len(a) // 2, rate * fade_in_ms // 1000)
+    n_out = min(len(a) // 2, rate * fade_out_ms // 1000)
+    for i in range(n_in):
+        a[i] = int(a[i] * i / n_in)
+    for i in range(n_out):
+        a[len(a) - 1 - i] = int(a[len(a) - 1 - i] * i / n_out)
+    return a.tobytes() + bytes(2 * (rate * tail_ms // 1000))
+
+
 def rms(pcm: bytes) -> float:
     n = len(pcm) // 2
     if n == 0:

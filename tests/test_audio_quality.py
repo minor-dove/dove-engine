@@ -155,3 +155,46 @@ def test_thinking_config_per_model_family():
     from app.services.llm_service import thinking_config
     assert thinking_config("gemini-2.5-flash") == {"thinkingBudget": 0}
     assert thinking_config("gemini-3.5-flash-lite") == {"thinkingLevel": "minimal"}
+
+
+def test_tts_rotates_models_when_one_is_out_of_daily_quota(monkeypatch):
+    import base64
+    import httpx
+    sp = _tts_env(monkeypatch, provider="gemini")
+    sp._tts_blocked_until.clear()
+    monkeypatch.setattr(sp.settings, "GEMINI_TTS_MODELS", "model-a,model-b")
+    raw = _sine(400, 24000, secs=0.25)
+    calls = []
+
+    def handler(req):
+        model = str(req.url).split("/models/")[1].split(":")[0]
+        calls.append(model)
+        if model == "model-a":
+            return httpx.Response(429, json={"error": {"details": [
+                {"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]},
+                {"retryDelay": "26230s"}]}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"inlineData": {
+            "mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(raw).decode()}}]}}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert sp._synthesize_gemini("hi") is not None
+    assert calls == ["model-a", "model-b"]
+    assert sp._tts_blocked_until["model-a"] > sp.time.monotonic() + 20000     # blocked until the daily reset
+    calls.clear()
+    assert sp._synthesize_gemini("again") is not None
+    assert calls == ["model-b"]                                               # model-a is skipped, no wasted call
+    sp._tts_blocked_until.clear()
+
+
+def test_shape_utterance_fades_and_ends_in_silence():
+    from app.voice.audio import shape_utterance
+    pcm = _sine(300, 16000, secs=1.0, amp=20000)
+    out = shape_utterance(pcm, 16000)
+    a = array("h"); a.frombytes(out)
+    assert abs(a[0]) < 50                                   # fade-in: starts at zero
+    assert all(x == 0 for x in a[-16000 // 4:])             # last 250 ms is silence
+    ramp = a[len(pcm) // 2 - 1000: len(pcm) // 2]           # fade-out region just before the silence tail is shrinking
+    tail_fade = [abs(x) for x in a[len(pcm) // 2 - 1440: len(pcm) // 2]]
+    assert max(tail_fade[-100:]) < max(tail_fade[:100])
+    assert len(out) == len(pcm) + 2 * 4000

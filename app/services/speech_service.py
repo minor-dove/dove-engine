@@ -2,7 +2,8 @@
 
 import logging
 import re
-from typing import List, Optional, Tuple
+import time
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 
@@ -136,20 +137,47 @@ def _synthesize_groq(text: str) -> Optional[bytes]:
     return out or None
 
 
-def _synthesize_gemini(text: str) -> Optional[bytes]:
-    """Gemini TTS -> PCM16 mono at AUDIO_SAMPLE_RATE (the API returns raw 24 kHz s16le as base64)."""
+_tts_blocked_until: Dict[str, float] = {}   # model -> monotonic time until which it is out of quota
+
+
+def _tts_models() -> List[str]:
+    models = [m.strip() for m in (settings.GEMINI_TTS_MODELS or "").split(",") if m.strip()]
+    return models or [settings.GEMINI_TTS_MODEL]
+
+
+def _quota_block_seconds(resp: "httpx.Response") -> float:
+    """How long to skip a model after a 429: a per-DAY free-tier quota blocks until it resets, anything else
+    (per-minute) only briefly."""
+    try:
+        err = resp.json().get("error", {})
+        per_day = any("PerDay" in (v.get("quotaId") or "")
+                      for d in err.get("details", []) for v in d.get("violations", []))
+        for d in err.get("details", []):
+            delay = d.get("retryDelay")
+            if per_day and isinstance(delay, str) and delay.endswith("s"):
+                return min(float(delay[:-1]) + 5, 86400.0)
+        return 6 * 3600.0 if per_day else 20.0
+    except Exception:
+        return 60.0
+
+
+def _synthesize_gemini_model(model: str, text: str) -> Optional[bytes]:
     import base64
     payload = {"contents": [{"parts": [{"text": text}]}],
                "generationConfig": {"responseModalities": ["AUDIO"],
                                     "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {
                                         "voiceName": settings.GEMINI_TTS_VOICE}}}}}
     headers = {"x-goog-api-key": settings.GEMINI_API_KEY, "Content-Type": "application/json"}
-    url = GEMINI_URL.format(model=settings.GEMINI_TTS_MODEL)
     try:
         with httpx.Client(timeout=settings.GROQ_TIMEOUT_SECONDS) as c:
-            r = c.post(url, json=payload, headers=headers)
+            r = c.post(GEMINI_URL.format(model=model), json=payload, headers=headers)
+            if r.status_code == 429:
+                secs = _quota_block_seconds(r)
+                _tts_blocked_until[model] = time.monotonic() + secs
+                logger.warning(f"TTS(gemini:{model}) out of quota; skipping it for {secs / 60:.0f} min")
+                return None
             if r.status_code != 200:
-                logger.warning(f"TTS(gemini) status {r.status_code}: {r.text[:160]}")
+                logger.warning(f"TTS(gemini:{model}) status {r.status_code}: {r.text[:160]}")
                 return None
             for cand in r.json().get("candidates") or []:
                 for part in (cand.get("content") or {}).get("parts") or []:
@@ -164,7 +192,20 @@ def _synthesize_gemini(text: str) -> Optional[bytes]:
                                 pass
                         return resample(base64.b64decode(inline["data"]), rate, settings.AUDIO_SAMPLE_RATE) or None
     except Exception as e:
-        logger.error(f"TTS(gemini) failed: {type(e).__name__}: {e}")
+        logger.error(f"TTS(gemini:{model}) failed: {type(e).__name__}: {e}")
+    return None
+
+
+def _synthesize_gemini(text: str) -> Optional[bytes]:
+    """Gemini TTS -> PCM16 mono at AUDIO_SAMPLE_RATE (raw 24 kHz s16le as base64). Tries each configured model
+    in order, skipping ones known to be out of (daily) quota."""
+    now = time.monotonic()
+    for model in _tts_models():
+        if _tts_blocked_until.get(model, 0.0) > now:
+            continue
+        out = _synthesize_gemini_model(model, text)
+        if out:
+            return out
     return None
 
 

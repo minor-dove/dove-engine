@@ -129,7 +129,9 @@ def test_profile_is_learned_after_a_session_and_used_next_time(db_session, mock_
     assert "works on a thesis" in prompt and "supervisor meeting on Friday" in prompt
 
 
-def test_followup_makes_it_a_conversation_and_is_not_scored(db_session, mock_mqtt, llm):
+def test_followup_makes_it_a_conversation_and_is_not_scored(db_session, mock_mqtt, llm, monkeypatch):
+    monkeypatch.setattr(stress_service.settings, "STRESS_MAX_FOLLOWUPS", 2)
+    monkeypatch.setattr(stress_service.settings, "STRESS_ITEMS_PER_SESSION", 5)
     long_answer = "honestly it has been a lot today with the deadline and a couple of meetings back to back"
     res = StressService.start_session(db_session, DEV, mqtt_publisher=mock_mqtt, now=_at(9))
     sid = res["session_id"]
@@ -202,7 +204,7 @@ def test_stats_updated_even_when_llm_is_offline(db_session, mock_mqtt, monkeypat
     monkeypatch.setattr(stress_service.llm_service, "generate_json", lambda *a, **k: None)
     _complete(db_session, mock_mqtt, _at(9), ["sometimes"] * 5)
     prof = ProfileService.get(db_session, DEV)
-    assert sum(v["asked"] for v in prof["item_stats"].values()) == 5
+    assert sum(v["asked"] for v in prof["item_stats"].values()) == 3
     assert prof["avg_answer_words"] == 1.0
     assert prof["recent_sessions"][-1]["summary"] == "morning check-in"
 
