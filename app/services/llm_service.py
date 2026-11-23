@@ -53,12 +53,18 @@ def provider() -> Optional[str]:
     return "groq" if groq_configured() else None
 
 
+def thinking_config(model: str) -> Dict:
+    """Disable/minimise hidden reasoning for speed. 2.5 models take a token budget; 3.x models a level
+    (and reject thinkingBudget=0)."""
+    return {"thinkingBudget": 0} if model.startswith("gemini-2.5") else {"thinkingLevel": "minimal"}
+
+
 def _gemini_call(system_prompt: str, contents: List[Dict], temperature: float, max_tokens: int,
                  json_mode: bool) -> Optional[str]:
     """One Gemini generateContent call -> text, or None on any failure. Retries once on 429."""
     gen = {"temperature": temperature, "maxOutputTokens": max_tokens,
-           # these check-in prompts need speed, not deliberation: no hidden 'thinking' tokens
-           "thinkingConfig": {"thinkingBudget": 0}}
+           # these check-in prompts need speed, not deliberation: minimal hidden 'thinking'
+           "thinkingConfig": thinking_config(settings.GEMINI_MODEL)}
     if json_mode:
         gen["responseMimeType"] = "application/json"
     payload = {"systemInstruction": {"parts": [{"text": system_prompt}]}, "contents": contents,

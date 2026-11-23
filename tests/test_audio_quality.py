@@ -72,3 +72,85 @@ def test_vad_keeps_quiet_sentence_tail_with_hysteresis():
     for _ in range(60):                 # back to noise only -> utterance ends
         vad.feed(frame(280))
     assert vad.done
+
+
+# ---- TTS provider selection / fallback ------------------------------------------------------------------
+
+def _tts_env(monkeypatch, provider="auto", gemini=True, groq=True):
+    from app.services import speech_service as sp
+    monkeypatch.setattr(sp.settings, "TTS_PROVIDER", provider)
+    monkeypatch.setattr(sp.settings, "GEMINI_API_KEY", "k" if gemini else None)
+    monkeypatch.setattr(sp.settings, "GROQ_API_KEY", "gsk_real" if groq else None)
+    return sp
+
+
+def test_tts_order(monkeypatch):
+    sp = _tts_env(monkeypatch)
+    assert sp.tts_order() == ["gemini", "groq"]
+    sp = _tts_env(monkeypatch, provider="groq")
+    assert sp.tts_order() == ["groq"]                      # explicit provider: only that one
+    sp = _tts_env(monkeypatch, gemini=False)
+    assert sp.tts_order() == ["groq"]
+    sp = _tts_env(monkeypatch, gemini=False, groq=False)
+    assert sp.tts_order() == [] and sp.synthesize("hello") is None
+
+
+def test_tts_falls_back_when_first_provider_fails(monkeypatch):
+    sp = _tts_env(monkeypatch)
+    monkeypatch.setattr(sp, "_synthesize_gemini", lambda t: None)          # e.g. 429
+    tone = _sine(300, 16000, amp=1000)
+    monkeypatch.setattr(sp, "_synthesize_groq", lambda t: tone)
+    pcm, rate = sp.synthesize("hello")
+    assert rate == 16000 and len(pcm) == len(tone) and rms(pcm) > rms(tone)   # normalised
+
+
+def test_gemini_tts_parses_inline_audio(monkeypatch):
+    import base64
+    import httpx
+    sp = _tts_env(monkeypatch)
+    raw24 = _sine(400, 24000, secs=0.5)
+    body = {"candidates": [{"content": {"parts": [{"inlineData": {
+        "mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(raw24).decode()}}]}}]}
+    seen = {}
+
+    def handler(req):
+        seen["url"], seen["key"] = str(req.url), req.headers.get("x-goog-api-key")
+        return httpx.Response(200, json=body)
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    out = sp._synthesize_gemini("hello there")
+    assert seen["key"] == "k" and "flash-lite-tts:generateContent" in seen["url"]
+    assert abs(len(out) // 2 - 8000) <= 2                       # 24 kHz -> 16 kHz
+
+
+def test_explicit_provider_means_only_that_provider(monkeypatch):
+    sp = _tts_env(monkeypatch, provider="gemini")          # both keys present, owner chose gemini: never call groq
+    assert sp.tts_order() == ["gemini"]
+    monkeypatch.setattr(sp.settings, "STT_PROVIDER", "gemini")
+    assert sp._order(sp.settings.STT_PROVIDER) == ["gemini"]
+    monkeypatch.setattr(sp, "_synthesize_gemini", lambda t: None)
+    monkeypatch.setattr(sp, "_synthesize_groq", lambda t: (_ for _ in ()).throw(AssertionError("groq called")))
+    assert sp.synthesize("hello") is None
+
+
+def test_gemini_stt_silence_marker_and_text(monkeypatch):
+    import httpx
+    sp = _tts_env(monkeypatch)
+    monkeypatch.setattr(sp.settings, "STT_PROVIDER", "gemini")
+    replies = iter(["[silence]", "I felt okay this morning"])
+
+    def handler(req):
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": next(replies)}]}}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    pcm = _sine(300, 16000, secs=2.0)
+    assert sp.transcribe(pcm, 16000) is None
+    assert sp.transcribe(pcm, 16000) == "I felt okay this morning"
+
+
+def test_thinking_config_per_model_family():
+    from app.services.llm_service import thinking_config
+    assert thinking_config("gemini-2.5-flash") == {"thinkingBudget": 0}
+    assert thinking_config("gemini-3.5-flash-lite") == {"thinkingLevel": "minimal"}

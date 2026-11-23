@@ -38,7 +38,12 @@ class Settings(BaseSettings):
     # STT/TTS (voice) still use Groq (GROQ_API_KEY) regardless of this setting.
     LLM_PROVIDER: str = "auto"
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"   # free-tier model; set GEMINI_MODEL to try another
+    GEMINI_TTS_MODEL: str = "gemini-3.8-flash-lite-tts"   # free-tier voice; preview models have tight limits
+    GEMINI_TTS_VOICE: str = "Kore"
+    STT_PROVIDER: str = "auto"                  # speech-to-text: auto = gemini when GEMINI_API_KEY is set, else groq
+    GEMINI_STT_MODEL: str = "gemini-3.5-flash-lite"   # audio-capable model used for transcription
+    TTS_PROVIDER: str = "auto"                  # auto = gemini when GEMINI_API_KEY is set, else groq; falls back to the other on failure
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"   # fast, cheap tier (2.5-flash-lite is closed to new users); set GEMINI_MODEL to try another
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_TEMPERATURE: float = 0.7

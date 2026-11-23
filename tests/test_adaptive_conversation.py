@@ -308,7 +308,7 @@ def test_gemini_json_call_shape_and_parse(monkeypatch):
     assert b["contents"][0]["parts"][0]["text"] == "user prompt"
     g = b["generationConfig"]
     assert g["responseMimeType"] == "application/json" and g["maxOutputTokens"] == 123 and g["temperature"] == 0.7
-    assert g["thinkingConfig"] == {"thinkingBudget": 0}
+    assert g["thinkingConfig"] == {"thinkingLevel": "minimal"}
 
 
 def test_gemini_failure_returns_none_and_chat_falls_back(monkeypatch):
