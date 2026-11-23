@@ -253,7 +253,11 @@ def test_repeat_request_repeats_the_question_and_changes_nothing(db_session, moc
     r2 = StressService.submit_answer(db_session, res["session_id"], "What did you say? Can you speak again?",
                                      mqtt_publisher=mock_mqtt)
     s = db_session.get(StressSession, res["session_id"])
-    assert r2["question"] == "Sure. " + opener
+    from app.services.stress_service import last_question
+    assert last_question("Good to hear. You seem calmer. How often did you feel on top of things?") == \
+        "How often did you feel on top of things?"
+    assert last_question("That's all for now.") == "That's all for now."
+    assert r2["question"] == "Sure. " + last_question(opener)
     assert s.current_index == 0 and s.clarify_used is False and len(s.responses) == 0
     r3 = StressService.submit_answer(db_session, res["session_id"], "can you repeat that", mqtt_publisher=mock_mqtt)
-    assert r3["question"] == "Sure. " + opener          # no 'Sure. Sure.'
+    assert r3["question"] == "Sure. " + last_question(opener)          # no 'Sure. Sure.'

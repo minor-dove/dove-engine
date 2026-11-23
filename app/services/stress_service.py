@@ -87,6 +87,13 @@ _REPEAT_RE = re.compile(
     r"|^\s*(what|huh|sorry)\s*[?.!]*\s*$", re.IGNORECASE)
 
 
+def last_question(text: str) -> str:
+    """Just the question from a spoken line ('Good to hear. How often did X?' -> 'How often did X?')."""
+    parts = re.findall(r"[^.!?]*\?", text or "")
+    q = parts[-1].strip() if parts else ""
+    return q or (text or "").strip()
+
+
 def is_repeat_request(text: str) -> bool:
     """'What did you say? Can you speak again?' is not an answer: just ask the same question again."""
     return bool(_REPEAT_RE.search(text or ""))
@@ -278,8 +285,7 @@ class StressService:
 
         # --- they asked Dove to repeat: say the same thing again; no scoring, no state change ---
         if is_repeat_request(text):
-            last = StressService._last_spoken(db, s)
-            reply = last if last.lower().startswith("sure") else "Sure. " + last
+            reply = "Sure. " + last_question(StressService._last_spoken(db, s))
             db.add(ConversationMessage(session_id=s.conversation_session_id, role="assistant", content=reply))
             db.commit()
             StressService._publish(mqtt_publisher, s, reply, "curious")
