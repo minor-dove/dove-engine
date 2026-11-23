@@ -15,6 +15,7 @@ so the device animates the mouth (text-only fallback).
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from starlette.concurrency import run_in_threadpool
@@ -69,7 +70,15 @@ class VoiceSessionRunner:
 
     # ---- speaking ----
     async def speak(self, text: str) -> None:
+        t_tts = time.monotonic()
         audio = await run_in_threadpool(self.tts, text) if text.strip() else None
+        tts_s = time.monotonic() - t_tts
+        turn = getattr(self, "_turn", None)
+        if turn:   # reply latency = user stopped talking -> first sound out (the listen->stt wait is in 'stt')
+            logger.info("voice turn timing: stt=%.1fs reply_llm=%.1fs tts=%.1fs (sum=%.1fs, excludes end-of-speech wait %.1fs)",
+                        turn["stt"], turn["answer"], tts_s, turn["stt"] + turn["answer"] + tts_s,
+                        settings.VOICE_SILENCE_MS / 1000)
+            self._turn = None
         if audio:
             pcm, rate = audio
             pcm = shape_utterance(pcm, rate)
@@ -178,7 +187,9 @@ class VoiceSessionRunner:
                     await self.t.send_json({"type": "error", "reason": "privacy_mode"})
                     return
                 utterance = await self.listen()
+                t_stt = time.monotonic()
                 answer = await run_in_threadpool(self.stt, utterance, settings.AUDIO_SAMPLE_RATE) if utterance else None
+                stt_s = time.monotonic() - t_stt
                 if not answer:
                     misses += 1
                     if misses >= settings.VOICE_MAX_MISSES:
@@ -188,7 +199,9 @@ class VoiceSessionRunner:
                     text = "Sorry, I didn't catch that. " + question   # ask the same question again
                     continue
                 misses = 0
+                t_ans = time.monotonic()
                 res = await self._db(lambda db: StressService.submit_answer(db, self.session_id, answer, self.publisher))
+                self._turn = {"stt": stt_s, "answer": time.monotonic() - t_ans, "t_end": time.monotonic()}
                 text = res["question"] or ""
                 if res["status"] != "active":
                     await self.speak(text)
