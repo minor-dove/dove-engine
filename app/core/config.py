@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     RUN_SCHEDULER: bool = True
 
     # Groq LLM API settings
+    # Text LLM provider: "gemini" | "groq" | "auto" (gemini when GEMINI_API_KEY is set, else groq).
+    # STT/TTS (voice) still use Groq (GROQ_API_KEY) regardless of this setting.
+    LLM_PROVIDER: str = "auto"
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"   # free-tier model; set GEMINI_MODEL to try another
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_TEMPERATURE: float = 0.7

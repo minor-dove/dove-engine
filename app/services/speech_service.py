@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 import httpx
 
 from app.core.config import settings
-from app.services.llm_service import LLMService
+from app.services.llm_service import groq_configured
 from app.voice.audio import normalize_speech, pcm_to_wav, resample, wav_to_pcm
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def clean_transcript(text: str, duration_s: float) -> Optional[str]:
 
 def transcribe(pcm: bytes, rate: int = None) -> Optional[str]:
     """PCM16 mono -> text (None if unconfigured/failed/empty)."""
-    if not pcm or not LLMService.is_configured():
+    if not pcm or not groq_configured():
         return None
     rate = rate or settings.AUDIO_SAMPLE_RATE
     try:
@@ -76,7 +76,7 @@ def split_text(text: str, limit: int = TTS_MAX_CHARS) -> List[str]:
 
 def synthesize(text: str) -> Optional[Tuple[bytes, int]]:
     """Text -> (PCM16 mono at AUDIO_SAMPLE_RATE, rate). None if TTS is unavailable."""
-    if not text.strip() or not LLMService.is_configured():
+    if not text.strip() or not groq_configured():
         return None
     out = b""
     try:
