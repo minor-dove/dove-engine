@@ -160,12 +160,15 @@ class VoiceSessionRunner:
             return
         self.session_id, text = found
         misses = 0
+        question = text
         try:
             while True:
                 if await self._privacy():
                     await self.t.send_json({"type": "error", "reason": "privacy_mode"})
                     return
                 await self.speak(text)
+                if not text.startswith("Sorry, I didn't catch that."):
+                    question = text
                 status = await self._db(lambda db: db.get(StressSession, self.session_id).status)
                 if status != "active":
                     break
@@ -180,7 +183,7 @@ class VoiceSessionRunner:
                         await self._db(lambda db: StressService.abort_session(db, self.session_id, self.publisher))
                         await self.t.send_json({"type": "session_end", "score": None})
                         return
-                    text = "Sorry, I didn't catch that. Could you say it again?"
+                    text = "Sorry, I didn't catch that. " + question   # ask the same question again
                     continue
                 misses = 0
                 res = await self._db(lambda db: StressService.submit_answer(db, self.session_id, answer, self.publisher))

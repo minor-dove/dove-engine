@@ -240,3 +240,20 @@ def test_old_database_gets_new_columns(monkeypatch):
     assert {"daypart", "window", "followups_used", "awaiting_followup", "summary"} <= cols
     with eng.connect() as c:
         assert c.execute(text("SELECT followups_used FROM stress_sessions")).scalar() == 0
+
+
+def test_repeat_request_repeats_the_question_and_changes_nothing(db_session, mock_mqtt, llm):
+    from app.services.stress_service import is_repeat_request
+    for t in ("What did you say? Can you speak again?", "sorry?", "huh", "can you repeat that", "speak louder"):
+        assert is_repeat_request(t)
+    for t in ("not much", "quite a bit stressed about the deadline", "sometimes"):
+        assert not is_repeat_request(t)
+    res = StressService.start_session(db_session, DEV, mqtt_publisher=mock_mqtt, now=_at(9))
+    opener = res["question"]
+    r2 = StressService.submit_answer(db_session, res["session_id"], "What did you say? Can you speak again?",
+                                     mqtt_publisher=mock_mqtt)
+    s = db_session.get(StressSession, res["session_id"])
+    assert r2["question"] == "Sure. " + opener
+    assert s.current_index == 0 and s.clarify_used is False and len(s.responses) == 0
+    r3 = StressService.submit_answer(db_session, res["session_id"], "can you repeat that", mqtt_publisher=mock_mqtt)
+    assert r3["question"] == "Sure. " + opener          # no 'Sure. Sure.'

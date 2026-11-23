@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     VOICE_NO_SPEECH_TIMEOUT_S: float = 10.0
     VOICE_MAX_UTTERANCE_S: float = 20.0
     VOICE_VAD_MIN_RMS: int = 350               # int16 RMS floor for 'speech'
-    VOICE_MAX_MISSES: int = 2                  # silent answers before the session is abandoned
+    VOICE_MAX_MISSES: int = 3                  # silent answers before the session is abandoned
 
     # Long-term Memory & RAG settings
     EMBEDDING_PROVIDER: str = "local"

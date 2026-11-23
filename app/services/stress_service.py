@@ -81,6 +81,17 @@ def heuristic_value(text: str) -> Optional[int]:
     return None
 
 
+_REPEAT_RE = re.compile(
+    r"\b(what did you say|what was that|say (that |it )?again|speak again|repeat|come again|pardon|"
+    r"i (didn'?t|did not|couldn'?t|can'?t) (catch|hear|understand)|speak (up|louder)|louder|too quiet)\b"
+    r"|^\s*(what|huh|sorry)\s*[?.!]*\s*$", re.IGNORECASE)
+
+
+def is_repeat_request(text: str) -> bool:
+    """'What did you say? Can you speak again?' is not an answer: just ask the same question again."""
+    return bool(_REPEAT_RE.search(text or ""))
+
+
 class StressService:
 
     # ---------- helpers ----------
@@ -264,6 +275,15 @@ class StressService:
         plan = StressService._plan(s)
         text = text.strip()
         db.add(ConversationMessage(session_id=s.conversation_session_id, role="user", content=text))
+
+        # --- they asked Dove to repeat: say the same thing again; no scoring, no state change ---
+        if is_repeat_request(text):
+            last = StressService._last_spoken(db, s)
+            reply = last if last.lower().startswith("sure") else "Sure. " + last
+            db.add(ConversationMessage(session_id=s.conversation_session_id, role="assistant", content=reply))
+            db.commit()
+            StressService._publish(mqtt_publisher, s, reply, "curious")
+            return StressService.describe(db, s, question=reply, face="curious")
 
         # --- unscored conversational turn: they answered a follow-up; now move on to the next item ---
         if s.awaiting_followup:
