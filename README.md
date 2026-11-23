@@ -213,4 +213,26 @@ Dev auth is off: use a trusted network only. In Docker the **worker** consumes M
 | `POST` | `/api/v1/stress/sessions` | Start a stress session (planner does this automatically while the user is present) |
 | `POST` | `/api/v1/stress/sessions/{id}/answer` | Submit an answer; returns next question or the final score |
 | `GET` | `/api/v1/stress/days/{date}` | Day score = mean of completed session scores |
+| `GET` | `/api/v1/stress/sessions?device_id=&limit=&offset=&day=&status=` | Check-in history (newest first) with per-session score, band, summary and preview (companion app) |
+| `GET` | `/api/v1/stress/sessions/{id}/transcript` | Messages of one check-in plus its summary (companion app) |
+| `DELETE` | `/api/v1/stress/sessions/{id}` | Erase a check-in, its transcript and derived memories (204) |
+| `POST` | `/api/v1/stress/sessions/{id}/abort` | End a running check-in early (excluded from the day score) |
+| `GET` | `/api/v1/stress/days?device_id=&days=7&end=` | Daily scores for a range (oldest first, `no_data` days are `null`, never 0) plus average and trend vs. the previous range |
+| `GET` / `DELETE` | `/api/v1/stress/profile?device_id=` | What Dove learned from check-ins; delete = forget |
+| `GET` | `/api/v1/devices/{id}/status` | Live device status: `connection` (online = status online and heard within 180 s), presence, **privacy mode**, today's completed check-ins, active session. Always 200 (`registered=false` for unknown ids) |
+| `GET` | `/api/v1/mood/summary/{device_id}?period=today\|week\|month` | Expression-label counts (hourly buckets for today, daily otherwise). Framing signal only, never part of the score |
+| `DELETE` | `/api/v1/mood/events/{device_id}` | Erase stored expression labels |
 | `GET` | `/api/v1/stats` | Aggregated metrics (conversations, tasks, reminders, routines, mood history) |
+
+
+---
+
+## 9. Companion app API notes
+
+The Flutter app (`minor-dove/dove-flutter-app`) uses only the REST endpoints above (schemas in `app/schemas/app_api.py`,
+aggregation in `app/services/app_overview_service.py`, tests in `tests/test_app_api.py`).
+
+* **Auth:** none. The API is meant for a trusted LAN (CORS is open, no key). Put it behind a reverse proxy with auth before exposing it anywhere else.
+* **Privacy mode is read-only from the API.** It is set by the device button over MQTT (`privacy` topic); the app can display it but cannot change it.
+* Scores shown to users are *perceived stress* indicators from spoken answers only; responses carry a `disclaimer`.
+* History endpoints are pure reads: they never combine emotion data with scores.
