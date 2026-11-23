@@ -141,8 +141,8 @@ class ProfileService:
         msgs = db.query(ConversationMessage).filter(
             ConversationMessage.session_id == s.conversation_session_id).order_by(ConversationMessage.id).all()
         user_msgs = [m.content for m in msgs if m.role == "user"]
-        if not user_msgs:
-            return  # nothing was said: nothing to learn
+        if not any(sum(c.isalpha() for c in t) >= 3 for t in user_msgs):
+            return  # nothing real was said (silence/noise transcripts): nothing to learn
 
         # 1. deterministic stats (offline-safe)
         stats = prof.setdefault("item_stats", {})

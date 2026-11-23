@@ -33,7 +33,8 @@ def wav_to_pcm(data: bytes) -> Tuple[bytes, int]:
 
 
 def resample(pcm: bytes, src: int, dst: int) -> bytes:
-    """Linear interpolation resampler (good enough for speech)."""
+    """Resample mono PCM16. Downsampling averages over each output sample's source window (a box low-pass,
+    so no harsh aliasing); upsampling uses linear interpolation."""
     if src == dst or not pcm:
         return pcm
     a = array("h")
@@ -42,6 +43,21 @@ def resample(pcm: bytes, src: int, dst: int) -> bytes:
     out = array("h", bytes(2 * n_out))
     ratio = src / dst
     last = len(a) - 1
+    if src > dst:
+        pre = [0]
+        for v in a:
+            pre.append(pre[-1] + v)
+
+        def cum(x: float) -> float:  # integral of the sample stream up to fractional position x
+            j = int(x)
+            if j >= len(a):
+                return float(pre[-1])
+            return pre[j] + a[j] * (x - j)
+
+        for i in range(n_out):
+            lo, hi = i * ratio, (i + 1) * ratio
+            out[i] = int((cum(hi) - cum(lo)) / (hi - lo))
+        return out.tobytes()
     for i in range(n_out):
         pos = i * ratio
         j = int(pos)
@@ -49,6 +65,22 @@ def resample(pcm: bytes, src: int, dst: int) -> bytes:
         s0 = a[j]
         s1 = a[j + 1] if j < last else s0
         out[i] = int(s0 + (s1 - s0) * frac)
+    return out.tobytes()
+
+
+def normalize_speech(pcm: bytes, target_rms: float = 4500.0, max_gain: float = 6.0,
+                     ceiling: float = 30000.0) -> bytes:
+    """Make synthesized speech loud and even on a small speaker: scale towards target_rms (capped gain) and
+    soft-limit peaks with tanh so louder never means clipping."""
+    if not pcm:
+        return pcm
+    a = array("h")
+    a.frombytes(pcm[: len(pcm) // 2 * 2])
+    cur = math.sqrt(sum(x * x for x in a) / len(a))
+    if cur < 1.0:
+        return pcm
+    g = min(max_gain, target_rms / cur)
+    out = array("h", (int(ceiling * math.tanh(g * x / ceiling)) for x in a))
     return out.tobytes()
 
 
