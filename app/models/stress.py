@@ -23,6 +23,11 @@ class StressSession(Base):
     current_index = Column(Integer, nullable=False, default=0)
     clarify_used = Column(Boolean, nullable=False, default=False)
     score = Column(Float, nullable=True)                        # 0-100, set on completion
+    daypart = Column(String(16), nullable=True)                 # morning | afternoon | evening | night (when it started)
+    window = Column(String(32), nullable=True)                  # time window the questions refer to, e.g. "since we last talked"
+    followups_used = Column(Integer, nullable=False, default=0)  # unscored conversational follow-ups asked
+    awaiting_followup = Column(Boolean, nullable=False, default=False)  # next user turn answers a follow-up (unscored)
+    summary = Column(Text, nullable=True)                       # one-line recap, written after the session
     started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     ended_at = Column(DateTime(timezone=True), nullable=True)
 

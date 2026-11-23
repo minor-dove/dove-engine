@@ -8,12 +8,27 @@ import httpx
 
 from app.core.config import settings
 from app.services.llm_service import LLMService
-from app.voice.audio import pcm_to_wav, resample, wav_to_pcm
+from app.voice.audio import normalize_speech, pcm_to_wav, resample, wav_to_pcm
 
 logger = logging.getLogger(__name__)
 
 GROQ = "https://api.groq.com/openai/v1"
 TTS_MAX_CHARS = 190  # orpheus rejects long inputs
+
+
+# What Whisper "hears" in silence/noise/clicks. Short clips that transcribe to one of these are noise.
+_HALLUCINATIONS = {"you", "thank you", "thanks", "thanks for watching", "bye", "okay", "uh", "um", "hmm"}
+
+
+def clean_transcript(text: str, duration_s: float) -> Optional[str]:
+    """None for non-speech: no letters/digits ('.', '...'), or a stock hallucination on a very short clip.
+    Treated as 'didn't catch that' upstream, so noise never consumes a question."""
+    t = (text or "").strip()
+    if not any(ch.isalnum() for ch in t):
+        return None
+    if duration_s < 1.2 and t.lower().strip(" .!?,") in _HALLUCINATIONS:
+        return None
+    return t
 
 
 def transcribe(pcm: bytes, rate: int = None) -> Optional[str]:
@@ -31,7 +46,7 @@ def transcribe(pcm: bytes, rate: int = None) -> Optional[str]:
                       "response_format": "json", "temperature": "0"},
             )
         if r.status_code == 200:
-            return (r.json().get("text") or "").strip() or None
+            return clean_transcript((r.json().get("text") or "").strip(), len(pcm) / 2 / rate)
         logger.warning(f"STT status {r.status_code}")
     except Exception as e:
         logger.error(f"STT failed: {type(e).__name__}")
@@ -81,4 +96,4 @@ def synthesize(text: str) -> Optional[Tuple[bytes, int]]:
     except Exception as e:
         logger.error(f"TTS failed: {type(e).__name__}: {e}")
         return None
-    return (out, settings.AUDIO_SAMPLE_RATE) if out else None
+    return (normalize_speech(out), settings.AUDIO_SAMPLE_RATE) if out else None
