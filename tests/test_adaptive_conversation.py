@@ -261,3 +261,25 @@ def test_repeat_request_repeats_the_question_and_changes_nothing(db_session, moc
     assert s.current_index == 0 and s.clarify_used is False and len(s.responses) == 0
     r3 = StressService.submit_answer(db_session, res["session_id"], "can you repeat that", mqtt_publisher=mock_mqtt)
     assert r3["question"] == "Sure. " + last_question(opener)          # no 'Sure. Sure.'
+
+
+def test_skip_request_drops_the_item_and_moves_on(db_session, mock_mqtt, llm):
+    from app.services.stress_service import is_skip_request
+    assert is_skip_request("I'm going to go to the next one.") and is_skip_request("skip this")
+    assert not is_skip_request("not much") and not is_skip_request("it was a nice start")
+    res = StressService.start_session(db_session, DEV, mqtt_publisher=mock_mqtt, now=_at(9))
+    r = StressService.submit_answer(db_session, res["session_id"], "I'm going to go to the next one.",
+                                    mqtt_publisher=mock_mqtt)
+    s = db_session.get(StressSession, res["session_id"])
+    assert s.current_index == 1 and s.clarify_used is False
+    assert s.responses[0].value is None and s.responses[0].evidence == "skipped by user"
+    assert not llm.of("score")            # nothing was scored
+
+
+def test_spoken_lines_are_kept_short():
+    long = ("That sounds like a really heavy morning with so much going on at once and I can hear how much it is. "
+            "It makes sense that you feel stretched when the days start like this and the list never ends. "
+            "So, how often did you feel on top of things so far this morning?")
+    out = StressService._shorten(long)
+    assert len(out) <= 230 and out.endswith("on top of things so far this morning?")
+    assert StressService._shorten("Short one. Fine?") == "Short one. Fine?"
