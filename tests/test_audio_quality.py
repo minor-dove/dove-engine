@@ -45,6 +45,7 @@ def test_noise_transcripts_are_not_answers():
     assert clean_transcript("...", 3.0) is None
     assert clean_transcript("you", 0.6) is None
     assert clean_transcript("Thank you.", 0.8) is None
+    assert clean_transcript("Transcribe.", 3.0) is None and clean_transcript("[silence]", 3.0) is None
     assert clean_transcript("you", 2.5) == "you"                  # a longer clip is a real (if odd) answer
     assert clean_transcript("not much, a bit stressed", 2.0) == "not much, a bit stressed"
 
