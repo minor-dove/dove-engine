@@ -45,6 +45,7 @@ def test_noise_transcripts_are_not_answers():
     assert clean_transcript("...", 3.0) is None
     assert clean_transcript("you", 0.6) is None
     assert clean_transcript("Thank you.", 0.8) is None
+    assert clean_transcript("Transcribe.", 3.0) is None and clean_transcript("[silence]", 3.0) is None
     assert clean_transcript("you", 2.5) == "you"                  # a longer clip is a real (if odd) answer
     assert clean_transcript("not much, a bit stressed", 2.0) == "not much, a bit stressed"
 
@@ -72,3 +73,128 @@ def test_vad_keeps_quiet_sentence_tail_with_hysteresis():
     for _ in range(60):                 # back to noise only -> utterance ends
         vad.feed(frame(280))
     assert vad.done
+
+
+# ---- TTS provider selection / fallback ------------------------------------------------------------------
+
+def _tts_env(monkeypatch, provider="auto", gemini=True, groq=True):
+    from app.services import speech_service as sp
+    monkeypatch.setattr(sp.settings, "TTS_PROVIDER", provider)
+    monkeypatch.setattr(sp.settings, "GEMINI_API_KEY", "k" if gemini else None)
+    monkeypatch.setattr(sp.settings, "GROQ_API_KEY", "gsk_real" if groq else None)
+    return sp
+
+
+def test_tts_order(monkeypatch):
+    sp = _tts_env(monkeypatch)
+    assert sp.tts_order() == ["gemini", "groq"]
+    sp = _tts_env(monkeypatch, provider="groq")
+    assert sp.tts_order() == ["groq"]                      # explicit provider: only that one
+    sp = _tts_env(monkeypatch, gemini=False)
+    assert sp.tts_order() == ["groq"]
+    sp = _tts_env(monkeypatch, gemini=False, groq=False)
+    assert sp.tts_order() == [] and sp.synthesize("hello") is None
+
+
+def test_tts_falls_back_when_first_provider_fails(monkeypatch):
+    sp = _tts_env(monkeypatch)
+    monkeypatch.setattr(sp, "_synthesize_gemini", lambda t: None)          # e.g. 429
+    tone = _sine(300, 16000, amp=1000)
+    monkeypatch.setattr(sp, "_synthesize_groq", lambda t: tone)
+    pcm, rate = sp.synthesize("hello")
+    assert rate == 16000 and len(pcm) == len(tone) and rms(pcm) > rms(tone)   # normalised
+
+
+def test_gemini_tts_parses_inline_audio(monkeypatch):
+    import base64
+    import httpx
+    sp = _tts_env(monkeypatch)
+    raw24 = _sine(400, 24000, secs=0.5)
+    body = {"candidates": [{"content": {"parts": [{"inlineData": {
+        "mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(raw24).decode()}}]}}]}
+    seen = {}
+
+    def handler(req):
+        seen["url"], seen["key"] = str(req.url), req.headers.get("x-goog-api-key")
+        return httpx.Response(200, json=body)
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    out = sp._synthesize_gemini("hello there")
+    assert seen["key"] == "k" and "flash-lite-tts:generateContent" in seen["url"]
+    assert abs(len(out) // 2 - 8000) <= 2                       # 24 kHz -> 16 kHz
+
+
+def test_explicit_provider_means_only_that_provider(monkeypatch):
+    sp = _tts_env(monkeypatch, provider="gemini")          # both keys present, owner chose gemini: never call groq
+    assert sp.tts_order() == ["gemini"]
+    monkeypatch.setattr(sp.settings, "STT_PROVIDER", "gemini")
+    assert sp._order(sp.settings.STT_PROVIDER) == ["gemini"]
+    monkeypatch.setattr(sp, "_synthesize_gemini", lambda t: None)
+    monkeypatch.setattr(sp, "_synthesize_groq", lambda t: (_ for _ in ()).throw(AssertionError("groq called")))
+    assert sp.synthesize("hello") is None
+
+
+def test_gemini_stt_silence_marker_and_text(monkeypatch):
+    import httpx
+    sp = _tts_env(monkeypatch)
+    monkeypatch.setattr(sp.settings, "STT_PROVIDER", "gemini")
+    replies = iter(["[silence]", "I felt okay this morning"])
+
+    def handler(req):
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": next(replies)}]}}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    pcm = _sine(300, 16000, secs=2.0)
+    assert sp.transcribe(pcm, 16000) is None
+    assert sp.transcribe(pcm, 16000) == "I felt okay this morning"
+
+
+def test_thinking_config_per_model_family():
+    from app.services.llm_service import thinking_config
+    assert thinking_config("gemini-2.5-flash") == {"thinkingBudget": 0}
+    assert thinking_config("gemini-3.5-flash-lite") == {"thinkingLevel": "minimal"}
+
+
+def test_tts_rotates_models_when_one_is_out_of_daily_quota(monkeypatch):
+    import base64
+    import httpx
+    sp = _tts_env(monkeypatch, provider="gemini")
+    sp._tts_blocked_until.clear()
+    monkeypatch.setattr(sp.settings, "GEMINI_TTS_MODELS", "model-a,model-b")
+    raw = _sine(400, 24000, secs=0.25)
+    calls = []
+
+    def handler(req):
+        model = str(req.url).split("/models/")[1].split(":")[0]
+        calls.append(model)
+        if model == "model-a":
+            return httpx.Response(429, json={"error": {"details": [
+                {"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]},
+                {"retryDelay": "26230s"}]}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"inlineData": {
+            "mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(raw).decode()}}]}}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(sp.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert sp._synthesize_gemini("hi") is not None
+    assert calls == ["model-a", "model-b"]
+    assert sp._tts_blocked_until["model-a"] > sp.time.monotonic() + 20000     # blocked until the daily reset
+    calls.clear()
+    assert sp._synthesize_gemini("again") is not None
+    assert calls == ["model-b"]                                               # model-a is skipped, no wasted call
+    sp._tts_blocked_until.clear()
+
+
+def test_shape_utterance_fades_and_ends_in_silence():
+    from app.voice.audio import shape_utterance
+    pcm = _sine(300, 16000, secs=1.0, amp=20000)
+    out = shape_utterance(pcm, 16000)
+    a = array("h"); a.frombytes(out)
+    assert abs(a[0]) < 50                                   # fade-in: starts at zero
+    assert all(x == 0 for x in a[-16000 // 4:])             # last 250 ms is silence
+    ramp = a[len(pcm) // 2 - 1000: len(pcm) // 2]           # fade-out region just before the silence tail is shrinking
+    tail_fade = [abs(x) for x in a[len(pcm) // 2 - 1440: len(pcm) // 2]]
+    assert max(tail_fade[-100:]) < max(tail_fade[:100])
+    assert len(out) == len(pcm) + 2 * 4000

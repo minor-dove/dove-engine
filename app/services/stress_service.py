@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -36,7 +37,7 @@ CHAT_SYSTEM = (
     "You are Dove, a small, warm desk pet having a relaxed spoken chat with your person. This is a "
     "check-in conversation, not a survey. Your words are spoken aloud by a speaker.\n"
     "Rules:\n"
-    "- At most 2 short sentences and about 30 words in total (a speaker reads it aloud; long replies get cut). "
+    "- At most 2 short sentences and about 20 words in total (a speaker reads it aloud; long replies get cut). "
     "Plain spoken words. No lists, emojis or markdown.\n"
     "- React to what they ACTUALLY said, with a specific detail, the way a friend would. Never reply "
     "with a generic 'thanks for sharing'.\n"
@@ -160,14 +161,16 @@ class StressService:
         return m.content if m else ""
 
     @staticmethod
-    def _score(db: Session, s: StressSession, item_id: int, answer: str) -> Dict[str, Any]:
-        """Score ONE answer against ONE item. Sees only the item, the answer and what Dove asked:
-        no emotion data, no profile. Deterministic (temperature 0) with a keyword fallback."""
-        usr = (f"Statement being measured ({s.window or 'today'}): {item_question(item_id, s.window or 'today')}\n"
-               f"What Dove actually asked: {StressService._last_spoken(db, s)}\n"
-               f"<user_said>{answer}</user_said>")
-        llm = llm_service.generate_json(SCORE_SYSTEM, usr)
-        if llm is None:
+    def _score_request(db: Session, s: StressSession, item_id: int, answer: str) -> str:
+        """Prompt for scoring ONE answer against ONE item. Sees only the item, the answer and what Dove asked:
+        no emotion data, no profile."""
+        return (f"Statement being measured ({s.window or 'today'}): {item_question(item_id, s.window or 'today')}\n"
+                f"What Dove actually asked: {StressService._last_spoken(db, s)}\n"
+                f"<user_said>{answer}</user_said>")
+
+    @staticmethod
+    def _score_from(llm: Optional[Dict[str, Any]], answer: str) -> Dict[str, Any]:
+        if llm is None:   # offline / failed: deterministic keyword fallback
             out: Dict[str, Any] = {"value": heuristic_value(answer)}
         else:
             out = dict(llm)
@@ -177,6 +180,12 @@ class StressService:
         if not out.get("evidence"):
             out["evidence"] = answer[:120]
         return out
+
+    @staticmethod
+    def _score(db: Session, s: StressSession, item_id: int, answer: str) -> Dict[str, Any]:
+        """Deterministic (temperature 0) with a keyword fallback."""
+        usr = StressService._score_request(db, s, item_id, answer)
+        return StressService._score_from(llm_service.generate_json(SCORE_SYSTEM, usr), answer)
 
     TASKS = {
         "opener": ("Greet them in a way that fits the time of day. If something under 'Worth asking about' "
@@ -194,10 +203,9 @@ class StressService:
     }
 
     @staticmethod
-    def _say(db: Session, s: StressSession, mode: str, item_id: Optional[int] = None,
-             user_said: Optional[str] = None, fallback: Optional[str] = "") -> Optional[str]:
-        """Dove's next spoken line, phrased for this person at this moment (temperature 0.7).
-        Falls back to `fallback` (canonical wording) when the LLM is unavailable."""
+    def _say_request(db: Session, s: StressSession, mode: str, item_id: Optional[int] = None,
+                     user_said: Optional[str] = None) -> str:
+        """Everything the phrasing model is told (all DB reads happen here, in the caller's thread)."""
         prof = ProfileService.get(db, s.device_id)
         started = s.started_at if s.started_at.tzinfo else s.started_at.replace(tzinfo=timezone.utc)
         ctx = build_context(db, s.device_id, now=started, exclude_session_id=s.id)
@@ -209,14 +217,26 @@ class StressService:
         if user_said is not None:
             parts.append(f"They just said: <user_said>{user_said}</user_said>")
         parts.append("YOUR TASK: " + StressService.TASKS[mode].format(q=q))
-        out = llm_service.generate_json(CHAT_SYSTEM, "\n\n".join(parts), max_tokens=220, temperature=0.7)
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _say_from(out: Optional[Dict[str, Any]], fallback: Optional[str]) -> Optional[str]:
         reply = out.get("reply") if isinstance(out, dict) else None
         if isinstance(reply, str) and reply.strip():
             return StressService._shorten(" ".join(reply.split()))
         return fallback
 
     @staticmethod
-    def _shorten(text: str, limit: int = 230) -> str:
+    def _say(db: Session, s: StressSession, mode: str, item_id: Optional[int] = None,
+             user_said: Optional[str] = None, fallback: Optional[str] = "") -> Optional[str]:
+        """Dove's next spoken line, phrased for this person at this moment (temperature 0.7).
+        Falls back to `fallback` (canonical wording) when the LLM is unavailable."""
+        usr = StressService._say_request(db, s, mode, item_id, user_said)
+        out = llm_service.generate_json(CHAT_SYSTEM, usr, max_tokens=220, temperature=0.7)
+        return StressService._say_from(out, fallback)
+
+    @staticmethod
+    def _shorten(text: str, limit: int = 180) -> str:
         """Spoken lines must stay short (TTS has per-request/per-minute caps): cut at a sentence boundary,
         always keeping the final sentence when it is the question."""
         if len(text) <= limit:
@@ -334,10 +354,21 @@ class StressService:
         next_item = None if is_last else plan[s.current_index + 1]
 
         skipped = is_skip_request(text)
+        spec = None   # speculatively phrased next line (advance / close), produced in parallel with scoring
         if skipped:   # they chose not to answer this one: record it as unanswered and move on, no clarifying
             out = {"value": None, "confidence": 0.0, "evidence": "skipped by user"}
         else:
-            out = StressService._score(db, s, item_id, text)   # the ONLY thing that produces a score input
+            # Latency: scoring and phrasing the next line don't depend on each other, so run both LLM calls at
+            # once (prompts are built here, in this thread; only the network calls run in workers).
+            score_usr = StressService._score_request(db, s, item_id, text)
+            say_usr = StressService._say_request(db, s, "close" if is_last else "advance",
+                                                 item_id=next_item, user_said=text)
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                f_score = ex.submit(llm_service.generate_json, SCORE_SYSTEM, score_usr)
+                f_say = ex.submit(llm_service.generate_json, CHAT_SYSTEM, say_usr, 220, 0.7)
+                # the ONLY thing that produces a score input is the scorer's answer
+                out = StressService._score_from(f_score.result(), text)
+                spec = f_say.result()
         value = out.get("value")
 
         if value is None and not s.clarify_used and not skipped:
@@ -358,8 +389,9 @@ class StressService:
                 face = "concerned" if st >= 3 else "happy" if st <= 1 else "neutral"
             if is_last:
                 db.flush()
-                closing = StressService._say(db, s, "close", user_said=text,
-                                             fallback=StressService._ack(s) + " That's all for now, take care of yourself.")
+                closing_fb = StressService._ack(s) + " That's all for now, take care of yourself."
+                closing = (StressService._say_from(spec, closing_fb) if spec is not None or not skipped
+                           else StressService._say(db, s, "close", user_said=text, fallback=closing_fb))
                 return StressService._finish(db, s, closing_prefix=closing, face=face,
                                              mqtt_publisher=mqtt_publisher)
 
@@ -371,8 +403,9 @@ class StressService:
                     s.awaiting_followup = True
                     face = "curious"
             if reply is None:
-                reply = StressService._say(db, s, "advance", item_id=next_item, user_said=text,
-                                           fallback=StressService._ack(s) + " " + item_question(next_item, s.window))
+                adv_fb = StressService._ack(s) + " " + item_question(next_item, s.window)
+                reply = (StressService._say_from(spec, adv_fb) if not skipped
+                         else StressService._say(db, s, "advance", item_id=next_item, user_said=text, fallback=adv_fb))
 
         db.add(ConversationMessage(session_id=s.conversation_session_id, role="assistant", content=reply))
         db.commit()

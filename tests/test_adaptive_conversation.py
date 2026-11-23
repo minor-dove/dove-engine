@@ -129,7 +129,9 @@ def test_profile_is_learned_after_a_session_and_used_next_time(db_session, mock_
     assert "works on a thesis" in prompt and "supervisor meeting on Friday" in prompt
 
 
-def test_followup_makes_it_a_conversation_and_is_not_scored(db_session, mock_mqtt, llm):
+def test_followup_makes_it_a_conversation_and_is_not_scored(db_session, mock_mqtt, llm, monkeypatch):
+    monkeypatch.setattr(stress_service.settings, "STRESS_MAX_FOLLOWUPS", 2)
+    monkeypatch.setattr(stress_service.settings, "STRESS_ITEMS_PER_SESSION", 5)
     long_answer = "honestly it has been a lot today with the deadline and a couple of meetings back to back"
     res = StressService.start_session(db_session, DEV, mqtt_publisher=mock_mqtt, now=_at(9))
     sid = res["session_id"]
@@ -202,7 +204,7 @@ def test_stats_updated_even_when_llm_is_offline(db_session, mock_mqtt, monkeypat
     monkeypatch.setattr(stress_service.llm_service, "generate_json", lambda *a, **k: None)
     _complete(db_session, mock_mqtt, _at(9), ["sometimes"] * 5)
     prof = ProfileService.get(db_session, DEV)
-    assert sum(v["asked"] for v in prof["item_stats"].values()) == 5
+    assert sum(v["asked"] for v in prof["item_stats"].values()) == 3
     assert prof["avg_answer_words"] == 1.0
     assert prof["recent_sessions"][-1]["summary"] == "morning check-in"
 
@@ -262,6 +264,79 @@ def test_repeat_request_repeats_the_question_and_changes_nothing(db_session, moc
     r3 = StressService.submit_answer(db_session, res["session_id"], "can you repeat that", mqtt_publisher=mock_mqtt)
     assert r3["question"] == "Sure. " + last_question(opener)          # no 'Sure. Sure.'
 
+
+# ---- Gemini provider --------------------------------------------------------------------------------------
+
+def _mock_gemini(monkeypatch, handler):
+    import httpx
+    from app.services import llm_service as L
+    real = httpx.Client
+    monkeypatch.setattr(L.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(L.settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(L.settings, "LLM_PROVIDER", "auto")
+
+
+def test_provider_selection(monkeypatch):
+    from app.services import llm_service as L
+    monkeypatch.setattr(L.settings, "GROQ_API_KEY", "gsk_real")
+    monkeypatch.setattr(L.settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(L.settings, "LLM_PROVIDER", "auto")
+    assert L.provider() == "groq"
+    monkeypatch.setattr(L.settings, "GEMINI_API_KEY", "k")
+    assert L.provider() == "gemini"                       # gemini wins in auto when its key exists
+    monkeypatch.setattr(L.settings, "LLM_PROVIDER", "groq")
+    assert L.provider() == "groq"
+    monkeypatch.setattr(L.settings, "LLM_PROVIDER", "gemini")
+    monkeypatch.setattr(L.settings, "GEMINI_API_KEY", None)
+    assert L.provider() is None and not L.LLMService.is_configured()
+
+
+def test_gemini_json_call_shape_and_parse(monkeypatch):
+    import json as _json
+    import httpx
+    from app.services import llm_service as L
+    seen = {}
+
+    def handler(req: httpx.Request):
+        seen["url"], seen["key"], seen["body"] = str(req.url), req.headers.get("x-goog-api-key"), _json.loads(req.content)
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"reply": "hi there"}'}]}}]})
+
+    _mock_gemini(monkeypatch, handler)
+    out = L.generate_json("sys prompt", "user prompt", max_tokens=123, temperature=0.7)
+    assert out == {"reply": "hi there"}
+    assert seen["key"] == "test-key" and ":generateContent" in seen["url"] and "key=" not in seen["url"]
+    b = seen["body"]
+    assert b["systemInstruction"]["parts"][0]["text"] == "sys prompt"
+    assert b["contents"][0]["parts"][0]["text"] == "user prompt"
+    g = b["generationConfig"]
+    assert g["responseMimeType"] == "application/json" and g["maxOutputTokens"] == 123 and g["temperature"] == 0.7
+    assert g["thinkingConfig"] == {"thinkingLevel": "minimal"}
+
+
+def test_gemini_failure_returns_none_and_chat_falls_back(monkeypatch):
+    import httpx
+    from app.services import llm_service as L
+    _mock_gemini(monkeypatch, lambda req: httpx.Response(500, text="boom"))
+    assert L.generate_json("s", "u") is None
+    assert L.LLMService.generate_response([{"role": "user", "content": "hi"}]) == L.FALLBACK_REPLY
+    _mock_gemini(monkeypatch, lambda req: httpx.Response(200, json={"candidates": []}))   # blocked / empty
+    assert L.generate_json("s", "u") is None
+
+
+def test_gemini_chat_maps_roles(monkeypatch):
+    import json as _json
+    import httpx
+    from app.services import llm_service as L
+    seen = {}
+
+    def handler(req):
+        seen["body"] = _json.loads(req.content)
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "hello!"}]}}]})
+
+    _mock_gemini(monkeypatch, handler)
+    out = L.LLMService.generate_response([{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}])
+    assert out == "hello!"
+    assert [c["role"] for c in seen["body"]["contents"]] == ["user", "model"]
 
 def test_skip_request_drops_the_item_and_moves_on(db_session, mock_mqtt, llm):
     from app.services.stress_service import is_skip_request

@@ -26,6 +26,7 @@ from app.models.stress import StressSession
 from app.services import speech_service
 from app.services.device_state_service import DeviceStateService
 from app.services.stress_service import StressService
+from app.voice.audio import shape_utterance
 from app.voice.vad import EnergyVAD
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class VoiceSessionRunner:
         audio = await run_in_threadpool(self.tts, text) if text.strip() else None
         if audio:
             pcm, rate = audio
+            pcm = shape_utterance(pcm, rate)
             ms = int(len(pcm) / 2 / rate * 1000)
             await self.t.send_json({"type": "speak_start", "duration_ms": ms, "sample_rate": rate, "audio": True})
             delay = (CHUNK_BYTES / 2 / rate) / settings.VOICE_SEND_PACE if settings.VOICE_SEND_PACE > 0 else 0

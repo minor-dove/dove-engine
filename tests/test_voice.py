@@ -114,7 +114,7 @@ def test_full_voice_session_completes(db_session):
     asyncio.run(runner.run())
     types = [m["type"] for m in dev.sent]
     assert types[0] == "speak_start" and dev.sent[0]["audio"] is True
-    assert types.count("listen") == 5 and types[-1] == "session_end"
+    assert types.count("listen") == 3 and types[-1] == "session_end"
     assert dev.sent[-1]["score"] is not None and dev.audio_bytes > 0
     s = db_session.query(StressSession).one()
     assert s.status == "completed"

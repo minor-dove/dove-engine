@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     RUN_SCHEDULER: bool = True
 
     # Groq LLM API settings
+    # Text LLM provider: "gemini" | "groq" | "auto" (gemini when GEMINI_API_KEY is set, else groq).
+    # STT/TTS (voice) still use Groq (GROQ_API_KEY) regardless of this setting.
+    LLM_PROVIDER: str = "auto"
+    GEMINI_API_KEY: Optional[str] = None
+    # Free-tier TTS is ~10 requests/DAY per model, so several models are rotated: when one is out of quota the next is used.
+    GEMINI_TTS_MODELS: str = "gemini-3.8-flash-lite-tts,gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
+    GEMINI_TTS_MODEL: str = "gemini-3.8-flash-lite-tts"   # legacy single-model setting (used if GEMINI_TTS_MODELS is empty)
+    GEMINI_TTS_VOICE: str = "Kore"
+    STT_PROVIDER: str = "auto"                  # speech-to-text: auto = gemini when GEMINI_API_KEY is set, else groq
+    GEMINI_STT_MODEL: str = "gemini-3.1-flash-lite"   # audio-capable model used for transcription
+    TTS_PROVIDER: str = "auto"                  # auto = gemini when GEMINI_API_KEY is set, else groq; falls back to the other on failure
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"   # fast, cheap tier (2.5-flash-lite is closed to new users); set GEMINI_MODEL to try another
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_TEMPERATURE: float = 0.7
@@ -47,7 +59,7 @@ class Settings(BaseSettings):
     GROQ_TTS_VOICE: str = "autumn"
     VOICE_SEND_PACE: float = 2.0               # TTS streamed at N x realtime (0 = as fast as possible)
     VOICE_FALLBACK_SPEED: float = 1.0          # text-only mouth timing speed-up (tests use a large value)
-    VOICE_SILENCE_MS: int = 1400               # end of utterance after this much silence
+    VOICE_SILENCE_MS: int = 1100               # end of utterance after this much silence
     VOICE_NO_SPEECH_TIMEOUT_S: float = 10.0
     VOICE_MAX_UTTERANCE_S: float = 20.0
     VOICE_VAD_MIN_RMS: int = 350               # int16 RMS floor for 'speech'
@@ -71,7 +83,8 @@ class Settings(BaseSettings):
     STRESS_MIN_GAP_MINUTES: int = 120          # gap between completed sessions
     STRESS_CATCHUP_GAP_MINUTES: int = 20       # used when the day is running out of time
     STRESS_RETRY_MINUTES: int = 15             # wait after an unfinished attempt
-    STRESS_MAX_FOLLOWUPS: int = 2              # unscored conversational follow-ups per session (0 = pure Q&A)
+    STRESS_ITEMS_PER_SESSION: int = 3          # scored questions per check-in (owner: only 3)
+    STRESS_MAX_FOLLOWUPS: int = 0              # unscored conversational follow-ups per session (0 = pure Q&A)
     STRESS_FOLLOWUP_MIN_WORDS: int = 8         # only follow up when the answer had this much to react to
     STRESS_PRESENCE_SETTLE_SECONDS: int = 60   # user must be present this long first
     STRESS_SESSION_TIMEOUT_MINUTES: int = 10   # idle active session is closed
