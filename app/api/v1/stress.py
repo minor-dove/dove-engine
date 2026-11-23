@@ -1,8 +1,8 @@
 """Stress assessment API: start/answer sessions, fetch session and day reports."""
 
 from datetime import date
-from typing import Any, Dict
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Any, Dict, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,8 @@ from app.api.deps import get_database
 from app.mqtt.client import mqtt_service
 from app.models.device import Device
 from app.models.stress import StressSession
+from app.schemas.app_api import DayHistoryResponse, SessionListResponse, SessionTranscriptResponse
+from app.services.app_overview_service import AppOverviewService
 from app.services.profile_service import ProfileService
 from app.services.stress_service import StressService
 
@@ -27,6 +29,22 @@ class AnswerRequest(BaseModel):
 
 def _publisher():
     return mqtt_service if mqtt_service.is_connected else None
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+def list_sessions(device_id: str = DEFAULT_DEVICE, limit: int = Query(default=50, ge=1, le=200),
+                  offset: int = Query(default=0, ge=0), day: Optional[date] = None,
+                  status: Optional[str] = Query(default=None, pattern="^(active|completed|incomplete|aborted)$"),
+                  db: Session = Depends(get_database)):
+    """Check-in history (newest first) with per-session score. Perceived stress, not a diagnosis."""
+    return AppOverviewService.list_sessions(db, device_id, limit=limit, offset=offset, day=day, status=status)
+
+
+@router.get("/days", response_model=DayHistoryResponse)
+def day_history(device_id: str = DEFAULT_DEVICE, days: int = Query(default=7, ge=1, le=90),
+                end: Optional[date] = None, db: Session = Depends(get_database)):
+    """Daily perceived-stress scores for the last `days` days (oldest first) plus trend vs the previous range."""
+    return AppOverviewService.day_history(db, device_id, days=days, end=end)
 
 
 @router.post("/sessions", status_code=201)
@@ -58,6 +76,23 @@ def get_session(session_id: str, db: Session = Depends(get_database)) -> Dict[st
     if not s:
         raise HTTPException(status_code=404, detail="Stress session not found")
     return StressService.describe(db, s)
+
+
+@router.get("/sessions/{session_id}/transcript", response_model=SessionTranscriptResponse)
+def session_transcript(session_id: str, db: Session = Depends(get_database)):
+    """What Dove and the user said in one check-in, with its score."""
+    res = AppOverviewService.transcript(db, session_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Stress session not found")
+    return res
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(session_id: str, db: Session = Depends(get_database)):
+    """Erase one check-in (its answers, transcript and derived memories). It no longer counts toward the day."""
+    if not AppOverviewService.delete_session(db, session_id):
+        raise HTTPException(status_code=404, detail="Stress session not found")
+    return Response(status_code=204)
 
 
 @router.get("/days/{day}")

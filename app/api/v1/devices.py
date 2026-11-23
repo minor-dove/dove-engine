@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_database
 from app.models.device import Device
+from app.schemas.app_api import DeviceStatusResponse
+from app.services.app_overview_service import AppOverviewService
 from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceResponse
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
@@ -40,6 +42,13 @@ def register_device(device_in: DeviceCreate, db: Session = Depends(get_database)
     db.commit()
     db.refresh(device)
     return device
+
+
+@router.get("/{device_id}/status", response_model=DeviceStatusResponse)
+def get_device_status(device_id: str, db: Session = Depends(get_database)):
+    """Live status for the app: connection, presence, privacy (do-not-disturb) mode, today's check-ins.
+    Always 200; `registered=false` / `connection=unknown` for ids the server has never seen."""
+    return AppOverviewService.device_status(db, device_id)
 
 
 @router.get("/{device_id}", response_model=DeviceResponse)

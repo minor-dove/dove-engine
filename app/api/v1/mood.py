@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_database
 from app.models.mood import MoodEvent
 from app.schemas.mood import MoodEventCreate, MoodEventResponse
+from app.schemas.app_api import MoodSummaryResponse
+from app.services.app_overview_service import AppOverviewService
 from app.services.trigger_engine import TriggerEngine
 
 router = APIRouter(prefix="/mood", tags=["Mood & Edge Sensory"])
@@ -44,3 +46,19 @@ def get_recent_mood_events(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/summary/{device_id}", response_model=MoodSummaryResponse)
+def mood_summary(
+    device_id: str,
+    period: str = Query(default="today", pattern="^(today|week|month)$"),
+    db: Session = Depends(get_database)
+):
+    """Expression-signal counts over a period (hourly buckets for today, daily otherwise). Never feeds the score."""
+    return AppOverviewService.mood_summary(db, device_id, period=period)
+
+
+@router.delete("/events/{device_id}")
+def delete_mood_events(device_id: str, db: Session = Depends(get_database)) -> Dict[str, Any]:
+    """Erase all stored expression signals for a device."""
+    return {"device_id": device_id, "deleted": AppOverviewService.delete_mood_events(db, device_id)}
