@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     GROQ_TTS_VOICE: str = "autumn"
     VOICE_SEND_PACE: float = 2.0               # TTS streamed at N x realtime (0 = as fast as possible)
     VOICE_FALLBACK_SPEED: float = 1.0          # text-only mouth timing speed-up (tests use a large value)
-    VOICE_SILENCE_MS: int = 1000               # end of utterance after this much silence
+    VOICE_SILENCE_MS: int = 1400               # end of utterance after this much silence
     VOICE_NO_SPEECH_TIMEOUT_S: float = 10.0
     VOICE_MAX_UTTERANCE_S: float = 20.0
     VOICE_VAD_MIN_RMS: int = 350               # int16 RMS floor for 'speech'

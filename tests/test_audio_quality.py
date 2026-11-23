@@ -47,3 +47,28 @@ def test_noise_transcripts_are_not_answers():
     assert clean_transcript("Thank you.", 0.8) is None
     assert clean_transcript("you", 2.5) == "you"                  # a longer clip is a real (if odd) answer
     assert clean_transcript("not much, a bit stressed", 2.0) == "not much, a bit stressed"
+
+
+def test_vad_keeps_quiet_sentence_tail_with_hysteresis():
+    import random
+    from app.voice.vad import EnergyVAD, FRAME_MS
+    rate = 16000
+    n = rate * FRAME_MS // 1000
+    rnd = random.Random(1)
+
+    def frame(level):  # noise-like frame with the requested RMS
+        return array("h", (int(rnd.gauss(0, level)) for _ in range(n))).tobytes()
+
+    vad = EnergyVAD(rate=rate, silence_ms=1000, min_rms=350)
+    for _ in range(50):                 # 1 s of mic noise at 280 -> start threshold ~700
+        vad.feed(frame(280))
+    assert not vad.started
+    for _ in range(25):                 # loud speech
+        vad.feed(frame(1500))
+    assert vad.started
+    for _ in range(60):                 # quiet tail (~500): below the start level, above noise -> still speech
+        vad.feed(frame(500))
+    assert not vad.done
+    for _ in range(60):                 # back to noise only -> utterance ends
+        vad.feed(frame(280))
+    assert vad.done

@@ -51,7 +51,7 @@ def test_wav_roundtrip_and_resample():
 def test_vad_detects_utterance_and_ignores_silence():
     v = EnergyVAD()
     assert not v.feed(silence(500))
-    assert v.feed(tone(600) + silence(1200))
+    assert v.feed(tone(600) + silence(1600))
     audio = v.audio()
     assert 0.5 < len(audio) / 2 / RATE < 1.6
     v2 = EnergyVAD()
@@ -80,7 +80,7 @@ class FakeDevice:
             self.inbox.put_nowait(("json", {"type": "speak_done"}))
         if d["type"] == "listen":
             if self.answers:
-                self.inbox.put_nowait(("bytes", tone(600) + silence(1200)))
+                self.inbox.put_nowait(("bytes", tone(600) + silence(1600)))
             # else: silence until server times out
 
     async def send_bytes(self, b):
@@ -188,7 +188,7 @@ def test_websocket_endpoint(client, db_session, monkeypatch):
             if d["type"] == "speak_end":
                 ws.send_text(json.dumps({"type": "speak_done"}))
             elif d["type"] == "listen":
-                ws.send_bytes(tone(600) + silence(1200))
+                ws.send_bytes(tone(600) + silence(1600))
             elif d["type"] == "session_end":
                 assert d["score"] is not None
                 break

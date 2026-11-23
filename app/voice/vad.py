@@ -29,7 +29,13 @@ class EnergyVAD:
         self.done = False
 
     def _threshold(self) -> float:
+        """Level that STARTS an utterance."""
         return max(float(self.min_rms), 2.5 * self._noise)
+
+    def _continue_threshold(self) -> float:
+        """Level that keeps an utterance going once it started (hysteresis): the ends of sentences and quiet
+        words dip below the start level but are still speech; only a drop near the noise floor ends it."""
+        return max(0.6 * self.min_rms, 1.5 * self._noise)
 
     def feed(self, chunk: bytes) -> bool:
         """Feed PCM bytes; returns True once a complete utterance has been captured."""
@@ -43,7 +49,7 @@ class EnergyVAD:
 
     def _frame(self, frame: bytes) -> None:
         level = rms(frame)
-        loud = level > self._threshold()
+        loud = level > (self._continue_threshold() if self.started else self._threshold())
         if not loud:  # noise floor only learns from non-speech frames
             self._noise = level if self._noise == 0.0 else 0.95 * self._noise + 0.05 * level
         if not self.started:
