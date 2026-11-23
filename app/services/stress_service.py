@@ -36,7 +36,8 @@ CHAT_SYSTEM = (
     "You are Dove, a small, warm desk pet having a relaxed spoken chat with your person. This is a "
     "check-in conversation, not a survey. Your words are spoken aloud by a speaker.\n"
     "Rules:\n"
-    "- 1-3 short sentences, plain spoken words. No lists, emojis or markdown.\n"
+    "- At most 2 short sentences and about 30 words in total (a speaker reads it aloud; long replies get cut). "
+    "Plain spoken words. No lists, emojis or markdown.\n"
     "- React to what they ACTUALLY said, with a specific detail, the way a friend would. Never reply "
     "with a generic 'thanks for sharing'.\n"
     "- Ask exactly ONE question.\n"
@@ -92,6 +93,16 @@ def last_question(text: str) -> str:
     parts = re.findall(r"[^.!?]*\?", text or "")
     q = parts[-1].strip() if parts else ""
     return q or (text or "").strip()
+
+
+_SKIP_RE = re.compile(
+    r"\b(skip|next (one|question)|go to the next|move on|pass on (this|that)|i (don'?t|do not) want to (answer|say|talk)|"
+    r"rather not (say|answer|talk))\b", re.IGNORECASE)
+
+
+def is_skip_request(text: str) -> bool:
+    """'I'm going to go to the next one' is a request to skip, not an answer to be rated or clarified."""
+    return bool(_SKIP_RE.search(text or ""))
 
 
 def is_repeat_request(text: str) -> bool:
@@ -201,8 +212,24 @@ class StressService:
         out = llm_service.generate_json(CHAT_SYSTEM, "\n\n".join(parts), max_tokens=220, temperature=0.7)
         reply = out.get("reply") if isinstance(out, dict) else None
         if isinstance(reply, str) and reply.strip():
-            return " ".join(reply.split())[:500]
+            return StressService._shorten(" ".join(reply.split()))
         return fallback
+
+    @staticmethod
+    def _shorten(text: str, limit: int = 230) -> str:
+        """Spoken lines must stay short (TTS has per-request/per-minute caps): cut at a sentence boundary,
+        always keeping the final sentence when it is the question."""
+        if len(text) <= limit:
+            return text
+        parts = re.findall(r"[^.!?]+[.!?]*", text)
+        q = parts[-1].strip() if parts and parts[-1].strip().endswith("?") else ""
+        head = ""
+        for p in parts[: -1 if q else None]:
+            if len((head + " " + p).strip()) + (len(q) + 1 if q else 0) > limit:
+                break
+            head = (head + " " + p).strip()
+        out = (head + " " + q).strip()
+        return out[:limit] if out else text[:limit]
 
     _ACKS = ("Thanks for telling me.", "Got it.", "I hear you.", "Okay, thanks.", "That helps me understand.")
 
@@ -306,10 +333,14 @@ class StressService:
         is_last = s.current_index + 1 >= len(plan)
         next_item = None if is_last else plan[s.current_index + 1]
 
-        out = StressService._score(db, s, item_id, text)   # the ONLY thing that produces a score input
+        skipped = is_skip_request(text)
+        if skipped:   # they chose not to answer this one: record it as unanswered and move on, no clarifying
+            out = {"value": None, "confidence": 0.0, "evidence": "skipped by user"}
+        else:
+            out = StressService._score(db, s, item_id, text)   # the ONLY thing that produces a score input
         value = out.get("value")
 
-        if value is None and not s.clarify_used:
+        if value is None and not s.clarify_used and not skipped:
             s.clarify_used = True
             reply = StressService._say(
                 db, s, "clarify", item_id=item_id, user_said=text,
